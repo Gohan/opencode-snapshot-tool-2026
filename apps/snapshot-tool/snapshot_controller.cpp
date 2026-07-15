@@ -28,7 +28,7 @@ SnapshotController::SnapshotController(QObject* parent) : QObject(parent), setti
   });
   connect(&previewWatcher_, &QFutureWatcher<CleanupPlan>::finished, this, [this] {
     cleanupPlan_ = previewWatcher_.result();
-    setStatus(tr("Preview ready: %1 trees can be released; estimated %2 immediately reclaimable")
+    setStatus(tr("Preview ready: %1 trees can be released; %2 in directly removable files. Git pack savings are measured after cleanup")
                   .arg(cleanupPlan_.removeTrees).arg(formatBytes(cleanupPlan_.estimatedReclaimableBytes)));
     emit planChanged();
     notifyBusy();

@@ -90,7 +90,12 @@ CleanupPlan SnapshotCleaner::preview(const ScanResult& scan, const CleanupSettin
 
 CleanupResult SnapshotCleaner::execute(const CleanupPlan& plan, const CleanupSettings& settings) const {
   CleanupResult result;
-  result.bytesBefore = plan.currentBytes;
+  qint64 plannedBytesAtPreview = 0;
+  for (const auto& repository : plan.repositories) plannedBytesAtPreview += repository.currentBytes;
+  const auto untouchedBytes = std::max<qint64>(0, plan.currentBytes - plannedBytesAtPreview);
+  result.bytesBefore = untouchedBytes;
+  for (const auto& repository : plan.repositories)
+    result.bytesBefore += SnapshotScanner::directorySize(repository.gitDir);
   for (const auto& repository : plan.repositories) {
     auto keepHashes = repository.keepHashes;
     const auto currentTree = git_.run(repository.gitDir, {QStringLiteral("write-tree")});
@@ -154,18 +159,19 @@ CleanupResult SnapshotCleaner::execute(const CleanupPlan& plan, const CleanupSet
       }
     }
 
-    const auto pruneAge = settings.recentDays <= 0
-                              ? QStringLiteral("now")
-                              : QStringLiteral("%1.days").arg(settings.recentDays);
     GitResult cleaned;
     if (settings.fullGc) {
+      // recentDays is the preview retention policy. Trees outside that policy have
+      // already been explicitly reviewed for release, so adding the same duration
+      // as a Git pruning grace period would make "Clean now" retain them again.
       git_.run(repository.gitDir, {QStringLiteral("reflog"), QStringLiteral("expire"),
-                                   QStringLiteral("--expire=%1").arg(pruneAge), QStringLiteral("--all")});
+                                   QStringLiteral("--expire=now"),
+                                   QStringLiteral("--expire-unreachable=now"), QStringLiteral("--all")});
       cleaned = git_.run(repository.gitDir,
-                         {QStringLiteral("gc"), QStringLiteral("--prune=%1").arg(pruneAge)}, {}, 600000);
+                         {QStringLiteral("gc"), QStringLiteral("--prune=now")}, {}, 600000);
     } else {
       cleaned = git_.run(repository.gitDir,
-                         {QStringLiteral("prune"), QStringLiteral("--expire=%1").arg(pruneAge)}, {}, 600000);
+                         {QStringLiteral("prune"), QStringLiteral("--expire=now")}, {}, 600000);
     }
     if (!cleaned.ok()) {
       result.error = QStringLiteral("Git cleanup failed in %1: %2")
@@ -174,7 +180,7 @@ CleanupResult SnapshotCleaner::execute(const CleanupPlan& plan, const CleanupSet
     }
     result.messages.push_back(QStringLiteral("Cleaned %1").arg(repository.relativePath));
   }
-  result.bytesAfter = 0;
+  result.bytesAfter = untouchedBytes;
   for (const auto& repository : plan.repositories)
     result.bytesAfter += SnapshotScanner::directorySize(repository.gitDir);
   result.success = true;

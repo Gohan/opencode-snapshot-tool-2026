@@ -2,11 +2,13 @@
 
 A cross-platform Qt 6 desktop application for inspecting OpenCode snapshot storage and safely reclaiming unreachable Git and Git LFS data.
 
+![OpenCode Snapshot Tool preview](docs/images/app-preview.png)
+
 ## What it does
 
 - Scans both legacy and project/worktree snapshot layouts.
 - Joins snapshot tree hashes to OpenCode session metadata from SQLite.
-- Reports actual on-disk bytes, including Git LFS and temporary pack files.
+- Reports the actual logical bytes under the snapshot root, including Git packs, Git LFS, metadata, and temporary pack files.
 - Retains every snapshot seen within a configurable time window; if none are recent, retains the newest N trees per repository.
 - Always protects the current Git index tree.
 - Reports missing paths, database failures, and unmapped historical records without hiding partial results.
@@ -28,7 +30,7 @@ Windows (MSVC and Qt are discovered; set `QT_ROOT` to override):
 ```powershell
 pwsh -NoProfile -File .\scripts\build.ps1 -Preset dev -Test
 pwsh -NoProfile -File .\scripts\build.ps1 -Preset release -Deploy
-pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.1.1
+pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.1.2
 ```
 
 If the test dependency cannot be downloaded, the GUI can still be built independently:
@@ -47,7 +49,9 @@ Run the development application on Windows from `build/dev/opencode-snapshot-too
 
 ## Safety model
 
-Scanning and previewing are read-only. Cleanup is enabled only after a preview and a confirmation dialog. Close OpenCode or ensure it is idle before cleanup. The tool creates refs under `refs/opencode-snapshot-tool/keep/` for retained trees, then runs Git pruning according to the selected retention age. Cleanup is destructive and cannot be undone from the application.
+Scanning and previewing are read-only. Cleanup is enabled only after a preview and a confirmation dialog. Close OpenCode or ensure it is idle before cleanup. The retention age selects which snapshot trees are kept during preview. At execution, the tool protects those trees under `refs/opencode-snapshot-tool/keep/`, also protects the current index tree, and immediately prunes objects that are unreachable from every protected tree. Cleanup is destructive and cannot be undone from the application.
+
+Snapshot records are Git trees, not independent full copies. Releasing a tree may reclaim little or no space when its objects are shared with retained trees. The direct-file estimate covers removable LFS and stale temporary files only; Git pack savings are reported from the measured before/after size after cleanup.
 
 ## Test strategy
 

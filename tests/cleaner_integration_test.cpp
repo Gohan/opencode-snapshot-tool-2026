@@ -1,5 +1,6 @@
 #include "ost/core/git_client.h"
 #include "ost/core/snapshot_cleaner.h"
+#include "ost/core/snapshot_scanner.h"
 
 #include <QDir>
 #include <QFile>
@@ -23,6 +24,18 @@ QString writeTree(const GitClient& git, const QString& gitDir, const QByteArray&
   return QString::fromLatin1(tree.output.trimmed());
 }
 
+QByteArray deterministicNoise(qsizetype size) {
+  QByteArray result(size, Qt::Uninitialized);
+  quint32 state = 0x6d2b79f5U;
+  for (qsizetype i = 0; i < size; ++i) {
+    state ^= state << 13;
+    state ^= state >> 17;
+    state ^= state << 5;
+    result[i] = static_cast<char>(state & 0xffU);
+  }
+  return result;
+}
+
 TEST(SnapshotCleaner, PreviewDoesNotWriteAndExecuteKeepsOnlyPlannedTrees) {
   GitClient git;
   if (!git.available()) GTEST_SKIP() << "git is required";
@@ -31,7 +44,7 @@ TEST(SnapshotCleaner, PreviewDoesNotWriteAndExecuteKeepsOnlyPlannedTrees) {
   const auto gitDir = QDir(temp.path()).filePath("snapshot.git");
   ASSERT_TRUE(git.run(gitDir, {"init", "--bare"}).ok());
   const auto keep = writeTree(git, gitDir, "keep");
-  const auto remove = writeTree(git, gitDir, "remove");
+  const auto remove = writeTree(git, gitDir, deterministicNoise(4 * 1024 * 1024));
 
   RepositoryInfo repo;
   repo.gitDir = gitDir;
@@ -44,8 +57,10 @@ TEST(SnapshotCleaner, PreviewDoesNotWriteAndExecuteKeepsOnlyPlannedTrees) {
   dropped.hash = remove;
   dropped.exists = true;
   repo.snapshots = {kept, dropped};
+  repo.actualBytes = ost::core::SnapshotScanner::directorySize(gitDir);
   ScanResult scan;
   scan.repositories = {repo};
+  scan.totalBytes = repo.actualBytes;
   SnapshotCleaner cleaner(git);
 
   const auto plan = cleaner.preview(scan, CleanupSettings{});
@@ -57,9 +72,12 @@ TEST(SnapshotCleaner, PreviewDoesNotWriteAndExecuteKeepsOnlyPlannedTrees) {
   // Execution must protect this tree even though it is absent from the plan.
   const auto currentAtExecution = writeTree(git, gitDir, "current at execution");
   ASSERT_TRUE(git.run(gitDir, {"read-tree", currentAtExecution}).ok());
+  const auto bytesBeforeExecution = ost::core::SnapshotScanner::directorySize(gitDir);
 
   auto settings = CleanupSettings{};
-  settings.recentDays = 0;
+  // The retention window selects trees during preview. Once a tree has been
+  // reviewed for release, cleanup must not add another seven-day Git grace period.
+  settings.recentDays = 7;
   settings.fullGc = true;
   settings.pruneLfs = false;
   const auto result = cleaner.execute(plan, settings);
@@ -69,5 +87,6 @@ TEST(SnapshotCleaner, PreviewDoesNotWriteAndExecuteKeepsOnlyPlannedTrees) {
   EXPECT_TRUE(git.run(gitDir, {"show-ref", "--verify",
                                "refs/opencode-snapshot-tool/keep/" + currentAtExecution}).ok());
   EXPECT_FALSE(git.run(gitDir, {"cat-file", "-e", remove}).ok());
+  EXPECT_LT(result.bytesAfter, bytesBeforeExecution - 1024 * 1024);
 }
 }  // namespace

@@ -426,11 +426,11 @@ ApplicationWindow {
         RowLayout {
             Layout.fillWidth: true
             spacing: 10
-            MetricCard { label: qsTr("Storage"); value: snapshotController.formatBytes(snapshotController.totalBytes); accent: window.yellow }
+            MetricCard { label: qsTr("Snapshot storage"); value: snapshotController.formatBytes(snapshotController.totalBytes); accent: window.yellow }
             MetricCard { label: qsTr("Repositories"); value: snapshotController.repositoryCount.toString(); accent: window.blue }
             MetricCard { label: qsTr("Snapshot records"); value: snapshotController.snapshotCount.toString(); accent: window.yellow }
             MetricCard { label: qsTr("Retain / release"); value: snapshotController.keepCount + " / " + snapshotController.dropCount; accent: window.blue }
-            MetricCard { label: qsTr("Immediate estimate"); value: snapshotController.formatBytes(snapshotController.estimatedReclaimableBytes); accent: window.red }
+            MetricCard { label: qsTr("Direct file estimate"); value: snapshotController.formatBytes(snapshotController.estimatedReclaimableBytes); accent: window.red }
         }
 
         SplitView {
@@ -756,7 +756,7 @@ ApplicationWindow {
                 Label { id: warningLabel; anchors.fill: parent; anchors.margins: 12; text: qsTr("Close OpenCode or ensure it is idle before continuing. Cleanup cannot be undone from this tool."); color: window.ink; wrapMode: Text.Wrap; font.weight: Font.Bold }
             }
             Label { text: qsTr("PROTECT %1 TREES  /  RELEASE %2 TREES").arg(snapshotController.planKeepTrees).arg(snapshotController.planRemoveTrees); color: window.red; font.family: "Space Grotesk"; font.pixelSize: 18; font.weight: Font.Bold }
-            Label { text: qsTr("Estimated immediately reclaimable: %1").arg(snapshotController.formatBytes(snapshotController.estimatedReclaimableBytes)); color: window.blue; font.weight: Font.Bold }
+            Label { Layout.fillWidth: true; text: qsTr("Directly removable LFS/temp files: %1. Git pack savings are measured after cleanup.").arg(snapshotController.formatBytes(snapshotController.estimatedReclaimableBytes)); color: window.blue; wrapMode: Text.Wrap; font.weight: Font.Bold }
         }
     }
 
