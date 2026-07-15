@@ -8,6 +8,11 @@ qt_add_qml_module(opencode-snapshot-tool
   URI OpenCodeSnapshotTool
   VERSION 1.0
   QML_FILES qml/Main.qml
+  RESOURCES
+    assets/fonts/Inter-Variable.ttf
+    assets/fonts/OFL-Inter.txt
+    assets/fonts/OFL-SpaceGrotesk.txt
+    assets/fonts/SpaceGrotesk-Variable.ttf
 )
 
 target_link_libraries(opencode-snapshot-tool PRIVATE

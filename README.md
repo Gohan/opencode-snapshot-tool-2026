@@ -16,6 +16,8 @@ A cross-platform Qt 6 desktop application for inspecting OpenCode snapshot stora
 The default paths are discovered from `OPENCODE_DATA_HOME`, `XDG_DATA_HOME`, or the platform's normal OpenCode data directory. Settings are editable and persisted locally.
 Configurable cleanup options include the recent retention window, per-repository fallback count, full GC versus prune-only behavior, LFS pruning, and the stale temporary-file threshold.
 
+The interface follows the Bauhaus / Neo-Brutalist system in [`design.md`](design.md): warm paper surfaces, solid geometry, thick borders, explicit high-contrast control colors, and no platform-theme-dependent button styling. Space Grotesk and Inter are bundled under the SIL Open Font License.
+
 ## Build
 
 Requirements: CMake 3.24+, Ninja, a C++20 compiler, Git, and Qt 6.8+ (`Core`, `Sql`, `Concurrent`, `Quick`, `QuickControls2`, and `Widgets`). GoogleTest is fetched only when tests are enabled.
@@ -25,6 +27,7 @@ Windows (MSVC and Qt are discovered; set `QT_ROOT` to override):
 ```powershell
 pwsh -NoProfile -File .\scripts\build.ps1 -Preset dev -Test
 pwsh -NoProfile -File .\scripts\build.ps1 -Preset release -Deploy
+pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.1.0
 ```
 
 If the test dependency cannot be downloaded, the GUI can still be built independently:

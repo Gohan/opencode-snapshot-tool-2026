@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -6,66 +8,288 @@ ApplicationWindow {
     id: window
     width: 1440
     height: 900
-    minimumWidth: 1060
-    minimumHeight: 680
+    minimumWidth: 1080
+    minimumHeight: 720
     visible: true
     title: qsTr("OpenCode Snapshot Tool")
-    color: "#0b0f17"
+    color: paper
 
-    palette.window: "#0b0f17"
-    palette.windowText: "#e8edf6"
-    palette.base: "#121925"
-    palette.text: "#e8edf6"
-    palette.button: "#1a2433"
-    palette.buttonText: "#e8edf6"
-    palette.highlight: "#76e4b4"
-    palette.highlightedText: "#07110d"
+    readonly property color ink: "#1a1a1a"
+    readonly property color yellow: "#ffcc00"
+    readonly property color red: "#e63b2e"
+    readonly property color blue: "#0055ff"
+    readonly property color paper: "#f5f0e8"
+    readonly property color white: "#ffffff"
+    readonly property color muted: "#5c574f"
 
-    Shortcut { sequence: "Ctrl+,"; onActivated: settingsPopup.open() }
+    palette.window: paper
+    palette.windowText: ink
+    palette.base: paper
+    palette.text: ink
+    palette.button: yellow
+    palette.buttonText: ink
+    palette.highlight: blue
+    palette.highlightedText: white
+
+    Shortcut { sequence: "Ctrl+,"; onActivated: settingsDialog.open() }
     Shortcut {
         sequence: "Ctrl+P"
         enabled: !snapshotController.busy && snapshotController.repositoryCount > 0
         onActivated: snapshotController.previewCleanup()
     }
 
-    component MetricCard: Rectangle {
+    component BrutalButton: Button {
+        id: control
+        property color fillColor: window.yellow
+        property color foregroundColor: window.ink
+        property color hoverFillColor: window.ink
+        property color hoverForegroundColor: window.yellow
+        property bool offset: true
+
+        implicitWidth: Math.max(118, contentItem.implicitWidth + 34)
+        implicitHeight: 46
+        leftPadding: 17
+        rightPadding: 17
+        hoverEnabled: true
+        opacity: enabled ? 1 : 0.42
+
+        background: Item {
+            Rectangle {
+                visible: control.offset
+                x: 5
+                y: 5
+                width: parent.width - 5
+                height: parent.height - 5
+                color: window.ink
+            }
+            Rectangle {
+                x: control.down && control.offset ? 3 : 0
+                y: control.down && control.offset ? 3 : 0
+                width: parent.width - (control.offset ? 5 : 0)
+                height: parent.height - (control.offset ? 5 : 0)
+                color: control.hovered || control.down ? control.hoverFillColor : control.fillColor
+                border.color: window.ink
+                border.width: 3
+            }
+        }
+        contentItem: Text {
+            leftPadding: control.down && control.offset ? 3 : 0
+            topPadding: control.down && control.offset ? 3 : 0
+            text: control.text.toUpperCase()
+            color: control.hovered || control.down ? control.hoverForegroundColor : control.foregroundColor
+            font.family: "Space Grotesk"
+            font.pixelSize: 13
+            font.weight: Font.Bold
+            font.letterSpacing: 1.1
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+    }
+
+    component BrutalField: TextField {
+        id: field
+        implicitHeight: 44
+        color: window.ink
+        placeholderTextColor: window.muted
+        selectionColor: window.blue
+        selectedTextColor: window.white
+        font.family: "Inter"
+        font.pixelSize: 13
+        leftPadding: 8
+        rightPadding: 8
+        background: Item {
+            Rectangle { anchors.fill: parent; color: window.paper }
+            Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 3; color: window.ink }
+        }
+    }
+
+    component BrutalCheckBox: CheckBox {
+        id: check
+        spacing: 12
+        indicator: Rectangle {
+            implicitWidth: 24
+            implicitHeight: 24
+            x: check.leftPadding
+            y: parent.height / 2 - height / 2
+            color: check.checked ? window.yellow : window.paper
+            border.color: window.ink
+            border.width: 3
+            Text {
+                anchors.centerIn: parent
+                text: "×"
+                visible: check.checked
+                color: window.ink
+                font.family: "Space Grotesk"
+                font.pixelSize: 22
+                font.weight: Font.Bold
+            }
+        }
+        contentItem: Text {
+            leftPadding: check.indicator.width + check.spacing
+            text: check.text
+            color: window.ink
+            font.family: "Inter"
+            font.pixelSize: 13
+            verticalAlignment: Text.AlignVCenter
+            wrapMode: Text.Wrap
+        }
+    }
+
+    component NumberStepper: RowLayout {
+        id: stepper
+        property int value: 0
+        property int minimum: 0
+        property int maximum: 100
+        signal valueEdited(int nextValue)
+        spacing: 6
+        BrutalButton {
+            text: "−"
+            implicitWidth: 44
+            fillColor: window.paper
+            hoverForegroundColor: window.paper
+            offset: false
+            enabled: stepper.value > stepper.minimum
+            onClicked: stepper.valueEdited(stepper.value - 1)
+        }
+        Rectangle {
+            implicitWidth: 82
+            implicitHeight: 44
+            color: window.paper
+            border.color: window.ink
+            border.width: 3
+            Label {
+                anchors.centerIn: parent
+                text: stepper.value
+                color: window.ink
+                font.family: "Space Grotesk"
+                font.pixelSize: 16
+                font.weight: Font.Bold
+            }
+        }
+        BrutalButton {
+            text: "+"
+            implicitWidth: 44
+            fillColor: window.paper
+            hoverForegroundColor: window.paper
+            offset: false
+            enabled: stepper.value < stepper.maximum
+            onClicked: stepper.valueEdited(stepper.value + 1)
+        }
+    }
+
+    component BrutalPanel: Item {
+        id: panel
+        default property alias bodyData: panelBody.data
+        Rectangle {
+            x: 6
+            y: 6
+            width: parent.width - 6
+            height: parent.height - 6
+            color: window.ink
+        }
+        Rectangle {
+            id: panelBody
+            width: parent.width - 6
+            height: parent.height - 6
+            color: window.paper
+            border.color: window.ink
+            border.width: 3
+        }
+    }
+
+    component MetricCard: Item {
+        id: metric
         required property string label
         required property string value
-        property color accent: "#76e4b4"
-        radius: 12
-        color: "#121925"
-        border.color: "#263245"
-        implicitHeight: 82
+        property color accent: window.yellow
+        implicitHeight: 104
         Layout.fillWidth: true
-        Column {
-            anchors.fill: parent
-            anchors.margins: 15
-            spacing: 7
-            Label { text: parent.parent.label; color: "#8492a8"; font.pixelSize: 12 }
-            Label { text: parent.parent.value; color: parent.parent.accent; font.pixelSize: 23; font.weight: Font.DemiBold }
+        Rectangle {
+            x: 5
+            y: 5
+            width: parent.width - 5
+            height: parent.height - 5
+            color: window.ink
+        }
+        Rectangle {
+            width: parent.width - 5
+            height: parent.height - 5
+            color: window.paper
+            border.color: window.ink
+            border.width: 3
+            Rectangle { width: 11; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: metric.accent }
+            Column {
+                anchors.fill: parent
+                anchors.leftMargin: 26
+                anchors.rightMargin: 12
+                anchors.topMargin: 12
+                spacing: 5
+                Label {
+                    width: parent.width
+                    text: metric.label.toUpperCase()
+                    color: window.ink
+                    font.family: "Inter"
+                    font.pixelSize: 11
+                    font.weight: Font.Bold
+                    font.letterSpacing: 0.8
+                    elide: Text.ElideRight
+                }
+                Label {
+                    width: parent.width
+                    text: metric.value
+                    color: window.ink
+                    font.family: "Space Grotesk"
+                    font.pixelSize: 25
+                    font.weight: Font.Bold
+                    elide: Text.ElideRight
+                }
+            }
         }
     }
 
     header: ToolBar {
-        height: 68
-        background: Rectangle { color: "#0d131d"; border.color: "#202b3b" }
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 22
-            anchors.rightMargin: 22
-            spacing: 12
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 1
-                Label { text: qsTr("OpenCode Snapshot Tool"); font.pixelSize: 20; font.weight: Font.DemiBold }
-                Label { text: qsTr("See what is retained before reclaiming disk space"); color: "#8492a8"; font.pixelSize: 12 }
-            }
-            Button { text: qsTr("Settings"); onClicked: settingsPopup.open() }
-            Button {
-                text: snapshotController.busy ? qsTr("Working…") : qsTr("Scan")
-                enabled: !snapshotController.busy
-                highlighted: true
-                onClicked: snapshotController.scan()
+        implicitHeight: 124
+        padding: 0
+        background: Rectangle { color: window.ink }
+        contentItem: Item {
+            Rectangle { x: 22; y: 18; width: 14; height: 88; color: window.yellow }
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 56
+                anchors.rightMargin: 24
+                spacing: 14
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: -3
+                    Label {
+                        text: qsTr("OPENCODE / SNAPSHOT")
+                        color: window.white
+                        font.family: "Space Grotesk"
+                        font.pixelSize: 38
+                        font.weight: Font.Bold
+                        font.letterSpacing: -1.2
+                    }
+                    Label {
+                        text: qsTr("FORM FOLLOWS FUNCTION  ·  SEE IT BEFORE YOU CLEAN IT")
+                        color: window.yellow
+                        font.family: "Inter"
+                        font.pixelSize: 11
+                        font.weight: Font.Bold
+                        font.letterSpacing: 1.5
+                    }
+                }
+                BrutalButton {
+                    text: qsTr("Settings")
+                    fillColor: window.paper
+                    hoverForegroundColor: window.paper
+                    onClicked: settingsDialog.open()
+                }
+                BrutalButton {
+                    text: snapshotController.busy ? qsTr("Working…") : qsTr("Scan")
+                    enabled: !snapshotController.busy
+                    onClicked: snapshotController.scan()
+                }
             }
         }
     }
@@ -77,226 +301,324 @@ ApplicationWindow {
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 12
-            MetricCard { label: qsTr("Storage"); value: snapshotController.formatBytes(snapshotController.totalBytes) }
-            MetricCard { label: qsTr("Repositories"); value: snapshotController.repositoryCount.toString(); accent: "#80bfff" }
-            MetricCard { label: qsTr("Snapshot records"); value: snapshotController.snapshotCount.toString(); accent: "#cba6f7" }
-            MetricCard { label: qsTr("Retain / release"); value: snapshotController.keepCount + " / " + snapshotController.dropCount; accent: "#ffd580" }
-            MetricCard { label: qsTr("Immediate estimate"); value: snapshotController.formatBytes(snapshotController.estimatedReclaimableBytes); accent: "#ff9d8d" }
+            spacing: 10
+            MetricCard { label: qsTr("Storage"); value: snapshotController.formatBytes(snapshotController.totalBytes); accent: window.yellow }
+            MetricCard { label: qsTr("Repositories"); value: snapshotController.repositoryCount.toString(); accent: window.blue }
+            MetricCard { label: qsTr("Snapshot records"); value: snapshotController.snapshotCount.toString(); accent: window.yellow }
+            MetricCard { label: qsTr("Retain / release"); value: snapshotController.keepCount + " / " + snapshotController.dropCount; accent: window.blue }
+            MetricCard { label: qsTr("Immediate estimate"); value: snapshotController.formatBytes(snapshotController.estimatedReclaimableBytes); accent: window.red }
         }
 
         SplitView {
             Layout.fillWidth: true
             Layout.fillHeight: true
             orientation: Qt.Horizontal
+            handle: Rectangle {
+                implicitWidth: 14
+                color: window.paper
+                Rectangle { anchors.centerIn: parent; width: 3; height: 54; color: window.ink }
+            }
 
-            Rectangle {
-                SplitView.preferredWidth: 420
-                SplitView.minimumWidth: 310
-                color: "#101722"
-                radius: 12
-                border.color: "#263245"
+            BrutalPanel {
+                SplitView.preferredWidth: 430
+                SplitView.minimumWidth: 330
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 10
-                    RowLayout {
+                    anchors.margins: 3
+                    spacing: 0
+                    Rectangle {
                         Layout.fillWidth: true
-                        Label { text: qsTr("Repositories"); font.pixelSize: 16; font.weight: Font.DemiBold; Layout.fillWidth: true }
-                        Label { text: snapshotController.repositoryCount; color: "#8492a8" }
+                        implicitHeight: 54
+                        color: window.blue
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 15
+                            anchors.rightMargin: 15
+                            Label { text: qsTr("REPOSITORIES"); color: window.white; font.family: "Space Grotesk"; font.pixelSize: 18; font.weight: Font.Bold; Layout.fillWidth: true }
+                            Label { text: snapshotController.repositoryCount; color: window.white; font.family: "Space Grotesk"; font.pixelSize: 20; font.weight: Font.Bold }
+                        }
                     }
-                    TextField {
+                    BrutalField {
                         id: repositorySearch
                         Layout.fillWidth: true
-                        placeholderText: qsTr("Filter by project or path")
+                        Layout.leftMargin: 13
+                        Layout.rightMargin: 13
+                        Layout.topMargin: 7
+                        placeholderText: qsTr("FILTER BY PROJECT OR PATH")
                     }
                     ListView {
                         id: repositoryList
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        Layout.margins: 12
                         clip: true
                         spacing: 7
                         model: snapshotController.repositories
-                        ScrollBar.vertical: ScrollBar {}
+                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                         delegate: Rectangle {
                             required property var modelData
-                            width: repositoryList.width
-                            height: visible ? 90 : 0
-                            visible: repositorySearch.text.length === 0 ||
-                                     modelData.name.toLowerCase().includes(repositorySearch.text.toLowerCase()) ||
-                                     modelData.worktree.toLowerCase().includes(repositorySearch.text.toLowerCase())
-                            radius: 9
-                            color: snapshotController.selectedRepository === modelData.index ? "#203445" : mouse.containsMouse ? "#182231" : "#141c28"
-                            border.color: snapshotController.selectedRepository === modelData.index ? "#76e4b4" : "#243044"
-                            MouseArea { id: mouse; anchors.fill: parent; hoverEnabled: true; onClicked: snapshotController.selectedRepository = modelData.index }
+                            width: repositoryList.width - (repositoryList.ScrollBar.vertical.visible ? 10 : 0)
+                            height: visible ? 88 : 0
+                            visible: repositorySearch.text.length === 0
+                                     || modelData.name.toLowerCase().includes(repositorySearch.text.toLowerCase())
+                                     || modelData.worktree.toLowerCase().includes(repositorySearch.text.toLowerCase())
+                            color: snapshotController.selectedRepository === modelData.index ? window.yellow : repoMouse.containsMouse ? "#e4ded3" : window.paper
+                            border.color: window.ink
+                            border.width: snapshotController.selectedRepository === modelData.index ? 3 : 2
+                            MouseArea {
+                                id: repoMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: snapshotController.selectedRepository = modelData.index
+                            }
                             Column {
                                 anchors.fill: parent
-                                anchors.margins: 12
+                                anchors.margins: 11
                                 spacing: 5
-                                Label { width: parent.width; text: modelData.name; elide: Text.ElideMiddle; font.weight: Font.DemiBold }
-                                Label { width: parent.width; text: modelData.worktree || qsTr("Worktree unknown"); color: "#8492a8"; elide: Text.ElideMiddle; font.pixelSize: 11 }
+                                Label { width: parent.width; text: modelData.name; color: window.ink; elide: Text.ElideMiddle; font.family: "Space Grotesk"; font.pixelSize: 15; font.weight: Font.Bold }
+                                Label { width: parent.width; text: modelData.worktree || qsTr("Worktree unknown"); color: window.muted; elide: Text.ElideMiddle; font.pixelSize: 11 }
                                 Row {
-                                    spacing: 14
-                                    Label { text: modelData.bytesText; color: "#80bfff"; font.pixelSize: 11 }
-                                    Label { text: qsTr("%1 records").arg(modelData.snapshots); color: "#a9b5c7"; font.pixelSize: 11 }
-                                    Label { text: qsTr("%1 release").arg(modelData.dropped); color: modelData.dropped ? "#ff9d8d" : "#76e4b4"; font.pixelSize: 11 }
+                                    spacing: 13
+                                    Label { text: modelData.bytesText; color: window.blue; font.weight: Font.Bold; font.pixelSize: 11 }
+                                    Label { text: qsTr("%1 RECORDS").arg(modelData.snapshots); color: window.ink; font.pixelSize: 10; font.weight: Font.Bold }
+                                    Label { text: qsTr("%1 RELEASE").arg(modelData.dropped); color: modelData.dropped ? window.red : window.ink; font.pixelSize: 10; font.weight: Font.Bold }
                                 }
                             }
                         }
                         Label {
                             anchors.centerIn: parent
                             visible: repositoryList.count === 0
-                            text: qsTr("Run a scan to discover snapshot repositories")
-                            color: "#8492a8"
+                            text: qsTr("RUN A SCAN TO DISCOVER REPOSITORIES")
+                            color: window.muted
+                            font.weight: Font.Bold
                         }
                     }
                 }
             }
 
-            Rectangle {
+            BrutalPanel {
                 SplitView.fillWidth: true
-                SplitView.minimumWidth: 580
-                color: "#101722"
-                radius: 12
-                border.color: "#263245"
+                SplitView.minimumWidth: 610
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 10
-                    RowLayout {
+                    anchors.margins: 3
+                    spacing: 0
+                    Rectangle {
                         Layout.fillWidth: true
-                        Label { text: qsTr("Snapshots"); font.pixelSize: 16; font.weight: Font.DemiBold; Layout.fillWidth: true }
-                        Rectangle { width: 10; height: 10; radius: 5; color: "#76e4b4" }
-                        Label { text: qsTr("retained"); color: "#8492a8"; font.pixelSize: 11 }
-                        Rectangle { width: 10; height: 10; radius: 5; color: "#ff7f73" }
-                        Label { text: qsTr("released"); color: "#8492a8"; font.pixelSize: 11 }
+                        implicitHeight: 54
+                        color: window.yellow
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 15
+                            anchors.rightMargin: 15
+                            Label { text: qsTr("SNAPSHOTS"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 18; font.weight: Font.Bold; Layout.fillWidth: true }
+                            Rectangle { implicitWidth: 13; implicitHeight: 13; color: window.ink }
+                            Label { text: qsTr("RETAINED"); color: window.ink; font.pixelSize: 10; font.weight: Font.Bold }
+                            Rectangle { implicitWidth: 13; implicitHeight: 13; color: window.red; border.color: window.ink; border.width: 2 }
+                            Label { text: qsTr("RELEASED"); color: window.ink; font.pixelSize: 10; font.weight: Font.Bold }
+                        }
                     }
                     ListView {
                         id: snapshotList
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        Layout.margins: 12
                         clip: true
                         spacing: 7
                         model: snapshotController.snapshots
-                        ScrollBar.vertical: ScrollBar {}
+                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                         delegate: Rectangle {
                             required property var modelData
-                            width: snapshotList.width
-                            height: 92
-                            radius: 9
-                            color: "#141c28"
-                            border.color: modelData.keep ? "#2e6a57" : "#613b3d"
-                            Rectangle { width: 4; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; radius: 2; color: modelData.keep ? "#76e4b4" : "#ff7f73" }
+                            width: snapshotList.width - (snapshotList.ScrollBar.vertical.visible ? 10 : 0)
+                            height: 88
+                            color: window.paper
+                            border.color: window.ink
+                            border.width: 2
+                            Rectangle { width: 10; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.keep ? window.yellow : window.red }
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.margins: 12
-                                anchors.leftMargin: 16
+                                anchors.leftMargin: 23
+                                anchors.rightMargin: 12
+                                anchors.topMargin: 9
+                                anchors.bottomMargin: 9
                                 spacing: 14
                                 ColumnLayout {
                                     Layout.fillWidth: true
-                                    spacing: 4
-                                    Label { Layout.fillWidth: true; text: modelData.title; elide: Text.ElideRight; font.weight: Font.DemiBold }
-                                    Label { text: modelData.shortHash + "  ·  " + modelData.time + "  ·  " + modelData.source; color: "#8492a8"; font.family: "monospace"; font.pixelSize: 11 }
-                                    Label { text: modelData.keep ? modelData.reason : qsTr("Outside retention policy"); color: modelData.keep ? "#76e4b4" : "#ff9d8d"; font.pixelSize: 11 }
+                                    spacing: 3
+                                    Label { Layout.fillWidth: true; text: modelData.title; color: window.ink; elide: Text.ElideRight; font.family: "Space Grotesk"; font.pixelSize: 14; font.weight: Font.Bold }
+                                    Label { text: modelData.shortHash + "  /  " + modelData.time + "  /  " + modelData.source.toUpperCase(); color: window.muted; font.family: "monospace"; font.pixelSize: 10 }
+                                    Label { text: modelData.keep ? modelData.reason.toUpperCase() : qsTr("OUTSIDE RETENTION POLICY"); color: modelData.keep ? window.ink : window.red; font.pixelSize: 10; font.weight: Font.Bold }
                                 }
-                                Label { text: qsTr("%1 refs\n%2 sessions").arg(modelData.references).arg(modelData.sessions); horizontalAlignment: Text.AlignRight; color: "#a9b5c7"; font.pixelSize: 11 }
+                                Label { text: qsTr("%1 REFS\n%2 SESSIONS").arg(modelData.references).arg(modelData.sessions); horizontalAlignment: Text.AlignRight; color: window.ink; font.pixelSize: 10; font.weight: Font.Bold }
                             }
-                            ToolTip.visible: hover.hovered
+                            ToolTip.visible: snapshotHover.hovered
                             ToolTip.text: modelData.hash
-                            HoverHandler { id: hover }
+                            HoverHandler { id: snapshotHover }
                         }
-                        Label { anchors.centerIn: parent; visible: snapshotList.count === 0; text: qsTr("Select a repository to inspect snapshots"); color: "#8492a8" }
+                        Label { anchors.centerIn: parent; visible: snapshotList.count === 0; text: qsTr("SELECT A REPOSITORY TO INSPECT SNAPSHOTS"); color: window.muted; font.weight: Font.Bold }
                     }
                 }
             }
         }
 
-        Rectangle {
+        Item {
             Layout.fillWidth: true
-            implicitHeight: 64
-            radius: 12
-            color: "#121925"
-            border.color: "#263245"
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 12
-                spacing: 12
-                BusyIndicator { running: snapshotController.busy; visible: running; implicitWidth: 32; implicitHeight: 32 }
-                Label { text: snapshotController.status; color: "#a9b5c7"; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                Button { text: qsTr("Preview cleanup"); enabled: !snapshotController.busy && snapshotController.repositoryCount > 0; onClicked: snapshotController.previewCleanup() }
-                Button { text: qsTr("Clean now"); highlighted: true; enabled: !snapshotController.busy && snapshotController.hasPlan; onClicked: confirmDialog.open() }
+            implicitHeight: 72
+            Rectangle { x: 5; y: 5; width: parent.width - 5; height: parent.height - 5; color: window.ink }
+            Rectangle {
+                width: parent.width - 5
+                height: parent.height - 5
+                color: window.paper
+                border.color: window.ink
+                border.width: 3
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 12
+                    BusyIndicator { running: snapshotController.busy; visible: running; implicitWidth: 32; implicitHeight: 32; palette.highlight: window.blue }
+                    Rectangle { implicitWidth: 8; Layout.fillHeight: true; color: window.blue }
+                    Label { text: snapshotController.status; color: window.ink; Layout.fillWidth: true; wrapMode: Text.Wrap; font.weight: Font.Medium }
+                    BrutalButton {
+                        text: qsTr("Preview cleanup")
+                        fillColor: window.blue
+                        foregroundColor: window.white
+                        hoverForegroundColor: window.blue
+                        enabled: !snapshotController.busy && snapshotController.repositoryCount > 0
+                        onClicked: snapshotController.previewCleanup()
+                    }
+                    BrutalButton {
+                        text: qsTr("Clean now")
+                        fillColor: window.red
+                        foregroundColor: window.white
+                        hoverForegroundColor: window.red
+                        enabled: !snapshotController.busy && snapshotController.hasPlan
+                        onClicked: confirmDialog.open()
+                    }
+                }
             }
         }
     }
 
     Dialog {
-        id: settingsPopup
-        title: qsTr("Scan and retention settings")
+        id: settingsDialog
         modal: true
         anchors.centerIn: Overlay.overlay
-        width: Math.min(window.width - 80, 760)
-        standardButtons: Dialog.Close
-        ColumnLayout {
-            width: parent.width
-            spacing: 14
-            Label { text: qsTr("Snapshot directory"); color: "#8492a8" }
+        width: Math.min(window.width - 80, 820)
+        padding: 24
+        closePolicy: Popup.CloseOnEscape
+        Overlay.modal: Rectangle { color: "#991a1a1a" }
+        background: Rectangle { color: window.paper; border.color: window.ink; border.width: 3 }
+        header: Rectangle {
+            implicitHeight: 66
+            color: window.blue
+            border.color: window.ink
+            border.width: 3
+            Label { anchors.fill: parent; anchors.margins: 17; text: qsTr("SCAN / RETENTION SETTINGS"); color: window.white; font.family: "Space Grotesk"; font.pixelSize: 22; font.weight: Font.Bold; verticalAlignment: Text.AlignVCenter }
+        }
+        footer: Item {
+            implicitHeight: 68
+            BrutalButton { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: qsTr("Close"); onClicked: settingsDialog.close() }
+        }
+        contentItem: ColumnLayout {
+            spacing: 13
+            Label { text: qsTr("SNAPSHOT DIRECTORY"); color: window.ink; font.weight: Font.Bold; font.letterSpacing: 0.8 }
             RowLayout {
                 Layout.fillWidth: true
-                TextField {
-                    Layout.fillWidth: true
-                    text: snapshotController.snapshotRoot
-                    onEditingFinished: snapshotController.snapshotRoot = text
+                BrutalField { Layout.fillWidth: true; text: snapshotController.snapshotRoot; onEditingFinished: snapshotController.snapshotRoot = text }
+                BrutalButton { text: qsTr("Browse…"); fillColor: window.paper; hoverForegroundColor: window.paper; onClicked: snapshotController.chooseSnapshotRoot() }
+            }
+            Label { text: qsTr("OPENCODE DATABASE"); color: window.ink; font.weight: Font.Bold; font.letterSpacing: 0.8 }
+            RowLayout {
+                Layout.fillWidth: true
+                BrutalField { Layout.fillWidth: true; text: snapshotController.databasePath; onEditingFinished: snapshotController.databasePath = text }
+                BrutalButton { text: qsTr("Browse…"); fillColor: window.paper; hoverForegroundColor: window.paper; onClicked: snapshotController.chooseDatabase() }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: qsTr("Retain snapshots from the last"); color: window.ink; Layout.fillWidth: true }
+                NumberStepper { value: snapshotController.recentDays; minimum: 0; maximum: 3650; onValueEdited: snapshotController.recentDays = nextValue }
+                Label { text: qsTr("days"); color: window.ink; font.weight: Font.Bold }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: qsTr("If none are recent, retain newest per repository"); color: window.ink; Layout.fillWidth: true }
+                NumberStepper { value: snapshotController.fallbackCount; minimum: 1; maximum: 1000; onValueEdited: snapshotController.fallbackCount = nextValue }
+            }
+            BrutalCheckBox { Layout.fillWidth: true; text: qsTr("Run full Git garbage collection"); checked: snapshotController.fullGc; onToggled: snapshotController.fullGc = checked }
+            BrutalCheckBox { Layout.fillWidth: true; text: qsTr("Remove Git LFS objects not referenced by retained trees"); checked: snapshotController.pruneLfs; onToggled: snapshotController.pruneLfs = checked }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: qsTr("Remove temporary packs and empty index locks older than"); color: window.ink; Layout.fillWidth: true }
+                NumberStepper { value: snapshotController.staleFileHours; minimum: 1; maximum: 8760; onValueEdited: snapshotController.staleFileHours = nextValue }
+                Label { text: qsTr("hours"); color: window.ink; font.weight: Font.Bold }
+            }
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: settingsNote.implicitHeight + 22
+                color: window.yellow
+                border.color: window.ink
+                border.width: 2
+                Label {
+                    id: settingsNote
+                    anchors.fill: parent
+                    anchors.margins: 11
+                    text: qsTr("A setting change invalidates the current cleanup preview. Path changes require another scan; retention changes update the current result immediately.")
+                    color: window.ink
+                    wrapMode: Text.Wrap
+                    font.weight: Font.Bold
                 }
-                Button { text: qsTr("Browse…"); onClicked: snapshotController.chooseSnapshotRoot() }
             }
-            Label { text: qsTr("OpenCode database"); color: "#8492a8" }
-            RowLayout {
-                Layout.fillWidth: true
-                TextField {
-                    Layout.fillWidth: true
-                    text: snapshotController.databasePath
-                    onEditingFinished: snapshotController.databasePath = text
-                }
-                Button { text: qsTr("Browse…"); onClicked: snapshotController.chooseDatabase() }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Label { text: qsTr("Retain snapshots from the last"); Layout.fillWidth: true }
-                SpinBox { from: 0; to: 3650; value: snapshotController.recentDays; onValueModified: snapshotController.recentDays = value }
-                Label { text: qsTr("days") }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Label { text: qsTr("If none are recent, retain newest per repository"); Layout.fillWidth: true }
-                SpinBox { from: 1; to: 1000; value: snapshotController.fallbackCount; onValueModified: snapshotController.fallbackCount = value }
-            }
-            CheckBox { text: qsTr("Run full Git garbage collection"); checked: snapshotController.fullGc; onToggled: snapshotController.fullGc = checked }
-            CheckBox { text: qsTr("Remove Git LFS objects not referenced by retained trees"); checked: snapshotController.pruneLfs; onToggled: snapshotController.pruneLfs = checked }
-            RowLayout {
-                Layout.fillWidth: true
-                Label { text: qsTr("Remove temporary packs and empty index locks older than"); Layout.fillWidth: true }
-                SpinBox { from: 1; to: 8760; value: snapshotController.staleFileHours; onValueModified: snapshotController.staleFileHours = value }
-                Label { text: qsTr("hours") }
-            }
-            Label { Layout.fillWidth: true; text: qsTr("A setting change invalidates the current cleanup preview. Path changes require another scan; retention changes update the current result immediately."); color: "#ffd580"; wrapMode: Text.Wrap }
         }
     }
 
     Dialog {
         id: confirmDialog
-        title: qsTr("Confirm cleanup")
         modal: true
         anchors.centerIn: Overlay.overlay
-        width: 560
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        onAccepted: snapshotController.executeCleanup()
-        ColumnLayout {
-            width: parent.width
-            spacing: 10
-            Label { Layout.fillWidth: true; text: qsTr("This will protect retained trees with private Git refs, then prune unreachable Git/LFS data according to the preview."); wrapMode: Text.Wrap }
-            Label { Layout.fillWidth: true; text: qsTr("Close OpenCode or ensure it is idle before continuing. Cleanup cannot be undone from this tool."); color: "#ff9d8d"; wrapMode: Text.Wrap; font.weight: Font.DemiBold }
-            Label { text: qsTr("Protect %1 trees · release %2 trees").arg(snapshotController.planKeepTrees).arg(snapshotController.planRemoveTrees); color: "#ffd580" }
-            Label { text: qsTr("Estimated immediately reclaimable: %1").arg(snapshotController.formatBytes(snapshotController.estimatedReclaimableBytes)); color: "#76e4b4" }
+        width: 620
+        padding: 24
+        closePolicy: Popup.CloseOnEscape
+        Overlay.modal: Rectangle { color: "#991a1a1a" }
+        background: Rectangle { color: window.paper; border.color: window.ink; border.width: 3 }
+        header: Rectangle {
+            implicitHeight: 66
+            color: window.red
+            border.color: window.ink
+            border.width: 3
+            Label { anchors.fill: parent; anchors.margins: 17; text: qsTr("CONFIRM DESTRUCTIVE CLEANUP"); color: window.white; font.family: "Space Grotesk"; font.pixelSize: 22; font.weight: Font.Bold; verticalAlignment: Text.AlignVCenter }
+        }
+        footer: Item {
+            implicitHeight: 72
+            RowLayout {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 12
+                BrutalButton { text: qsTr("Cancel"); fillColor: window.paper; hoverForegroundColor: window.paper; onClicked: confirmDialog.reject() }
+                BrutalButton {
+                    text: qsTr("Clean now")
+                    fillColor: window.red
+                    foregroundColor: window.white
+                    hoverForegroundColor: window.red
+                    onClicked: {
+                        confirmDialog.accept()
+                        snapshotController.executeCleanup()
+                    }
+                }
+            }
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            Label { Layout.fillWidth: true; text: qsTr("This protects retained trees with private Git refs, then prunes unreachable Git/LFS data according to the preview."); color: window.ink; wrapMode: Text.Wrap }
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: warningLabel.implicitHeight + 24
+                color: window.yellow
+                border.color: window.ink
+                border.width: 3
+                Label { id: warningLabel; anchors.fill: parent; anchors.margins: 12; text: qsTr("Close OpenCode or ensure it is idle before continuing. Cleanup cannot be undone from this tool."); color: window.ink; wrapMode: Text.Wrap; font.weight: Font.Bold }
+            }
+            Label { text: qsTr("PROTECT %1 TREES  /  RELEASE %2 TREES").arg(snapshotController.planKeepTrees).arg(snapshotController.planRemoveTrees); color: window.red; font.family: "Space Grotesk"; font.pixelSize: 18; font.weight: Font.Bold }
+            Label { text: qsTr("Estimated immediately reclaimable: %1").arg(snapshotController.formatBytes(snapshotController.estimatedReclaimableBytes)); color: window.blue; font.weight: Font.Bold }
         }
     }
 
