@@ -42,4 +42,5 @@ Bold, raw, and unapologetic. Inspired by Bauhaus and brutalist architecture. Hig
 - Blue identifies repository navigation and neutral interactive data.
 - Red is reserved for released snapshots, warnings, and destructive cleanup.
 - Every interactive control owns its foreground and background colors; platform theme defaults must not determine legibility.
-
+- The application owns its complete window chrome: title, drag area, window controls, and border use the same graphic system as the content.
+- Cleanup is a visible two-step batch flow: preview all scanned repositories first, then unlock batch cleanup for that exact reviewed plan.

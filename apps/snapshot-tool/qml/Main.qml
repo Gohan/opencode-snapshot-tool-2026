@@ -13,6 +13,7 @@ ApplicationWindow {
     visible: true
     title: qsTr("OpenCode Snapshot Tool")
     color: paper
+    flags: Qt.Window | Qt.FramelessWindowHint
 
     readonly property color ink: "#1a1a1a"
     readonly property color yellow: "#ffcc00"
@@ -84,6 +85,97 @@ ApplicationWindow {
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
+        }
+    }
+
+    component WindowButton: Button {
+        id: windowControl
+        property color hoverColor: window.yellow
+        implicitWidth: 48
+        implicitHeight: 36
+        padding: 0
+        hoverEnabled: true
+        background: Rectangle {
+            color: windowControl.hovered ? windowControl.hoverColor : window.paper
+            border.color: window.ink
+            border.width: 0
+        }
+        contentItem: Text {
+            text: windowControl.text
+            color: window.ink
+            font.family: "Space Grotesk"
+            font.pixelSize: 17
+            font.weight: Font.Bold
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
+    component BatchButton: Button {
+        id: batchControl
+        required property string step
+        required property string actionLabel
+        required property string detail
+        property color fillColor: window.blue
+        property color foregroundColor: window.white
+        property color hoverForegroundColor: window.blue
+
+        implicitWidth: 270
+        implicitHeight: 64
+        leftPadding: 13
+        rightPadding: 13
+        hoverEnabled: true
+        opacity: enabled ? 1 : 0.58
+        background: Item {
+            Rectangle { x: 5; y: 5; width: parent.width - 5; height: parent.height - 5; color: window.ink }
+            Rectangle {
+                x: batchControl.down ? 3 : 0
+                y: batchControl.down ? 3 : 0
+                width: parent.width - 5
+                height: parent.height - 5
+                color: batchControl.hovered && batchControl.enabled ? window.ink : batchControl.fillColor
+                border.color: window.ink
+                border.width: 3
+            }
+        }
+        contentItem: RowLayout {
+            spacing: 12
+            Label {
+                text: batchControl.step
+                color: batchControl.hovered && batchControl.enabled ? batchControl.hoverForegroundColor : batchControl.foregroundColor
+                font.family: "Space Grotesk"
+                font.pixelSize: 27
+                font.weight: Font.Bold
+            }
+            Rectangle {
+                implicitWidth: 3
+                Layout.fillHeight: true
+                color: batchControl.hovered && batchControl.enabled ? batchControl.hoverForegroundColor : batchControl.foregroundColor
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 0
+                Label {
+                    Layout.fillWidth: true
+                    text: batchControl.actionLabel
+                    color: batchControl.hovered && batchControl.enabled ? batchControl.hoverForegroundColor : batchControl.foregroundColor
+                    font.family: "Space Grotesk"
+                    font.pixelSize: 14
+                    font.weight: Font.Bold
+                    font.letterSpacing: 0.8
+                    elide: Text.ElideRight
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: batchControl.detail
+                    color: batchControl.hovered && batchControl.enabled ? batchControl.hoverForegroundColor : batchControl.foregroundColor
+                    font.family: "Inter"
+                    font.pixelSize: 9
+                    font.weight: Font.Bold
+                    font.letterSpacing: 0.4
+                    elide: Text.ElideRight
+                }
+            }
         }
     }
 
@@ -249,46 +341,78 @@ ApplicationWindow {
     }
 
     header: ToolBar {
-        implicitHeight: 124
+        implicitHeight: 152
         padding: 0
         background: Rectangle { color: window.ink }
-        contentItem: Item {
-            Rectangle { x: 22; y: 18; width: 14; height: 88; color: window.yellow }
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 56
-                anchors.rightMargin: 24
-                spacing: 14
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: -3
-                    Label {
-                        text: qsTr("OPENCODE / SNAPSHOT")
-                        color: window.white
-                        font.family: "Space Grotesk"
-                        font.pixelSize: 38
-                        font.weight: Font.Bold
-                        font.letterSpacing: -1.2
-                    }
-                    Label {
-                        text: qsTr("FORM FOLLOWS FUNCTION  ·  SEE IT BEFORE YOU CLEAN IT")
-                        color: window.yellow
-                        font.family: "Inter"
-                        font.pixelSize: 11
-                        font.weight: Font.Bold
-                        font.letterSpacing: 1.5
-                    }
+        contentItem: Column {
+            Item {
+                width: parent.width
+                height: 36
+                Rectangle { anchors.fill: parent; color: window.paper }
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    onPressed: window.startSystemMove()
+                    onDoubleClicked: window.visibility === Window.Maximized ? window.showNormal() : window.showMaximized()
                 }
-                BrutalButton {
-                    text: qsTr("Settings")
-                    fillColor: window.paper
-                    hoverForegroundColor: window.paper
-                    onClicked: settingsDialog.open()
+                RowLayout {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 9
+                    Rectangle { implicitWidth: 14; implicitHeight: 14; color: window.yellow; border.color: window.ink; border.width: 2 }
+                    Rectangle { implicitWidth: 14; implicitHeight: 14; color: window.blue; border.color: window.ink; border.width: 2 }
+                    Label { text: qsTr("OPENCODE SNAPSHOT TOOL"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold; font.letterSpacing: 1 }
                 }
-                BrutalButton {
-                    text: snapshotController.busy ? qsTr("Working…") : qsTr("Scan")
-                    enabled: !snapshotController.busy
-                    onClicked: snapshotController.scan()
+                Row {
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    WindowButton { text: "—"; onClicked: window.showMinimized() }
+                    WindowButton { text: window.visibility === Window.Maximized ? "▣" : "□"; onClicked: window.visibility === Window.Maximized ? window.showNormal() : window.showMaximized() }
+                    WindowButton { text: "×"; hoverColor: window.red; onClicked: window.close() }
+                }
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 3; color: window.ink }
+            }
+            Item {
+                width: parent.width
+                height: 116
+                Rectangle { x: 22; y: 14; width: 14; height: 88; color: window.yellow }
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 56
+                    anchors.rightMargin: 24
+                    spacing: 14
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: -3
+                        Label {
+                            text: qsTr("OPENCODE / SNAPSHOT")
+                            color: window.white
+                            font.family: "Space Grotesk"
+                            font.pixelSize: 38
+                            font.weight: Font.Bold
+                            font.letterSpacing: -1.2
+                        }
+                        Label {
+                            text: qsTr("FORM FOLLOWS FUNCTION  ·  SEE IT BEFORE YOU CLEAN IT")
+                            color: window.yellow
+                            font.family: "Inter"
+                            font.pixelSize: 11
+                            font.weight: Font.Bold
+                            font.letterSpacing: 1.5
+                        }
+                    }
+                    BrutalButton {
+                        text: qsTr("Settings")
+                        fillColor: window.paper
+                        hoverForegroundColor: window.paper
+                        onClicked: settingsDialog.open()
+                    }
+                    BrutalButton {
+                        text: snapshotController.busy ? qsTr("Working…") : qsTr("Scan")
+                        enabled: !snapshotController.busy
+                        onClicked: snapshotController.scan()
+                    }
                 }
             }
         }
@@ -463,7 +587,7 @@ ApplicationWindow {
 
         Item {
             Layout.fillWidth: true
-            implicitHeight: 72
+            implicitHeight: 88
             Rectangle { x: 5; y: 5; width: parent.width - 5; height: parent.height - 5; color: window.ink }
             Rectangle {
                 width: parent.width - 5
@@ -473,21 +597,35 @@ ApplicationWindow {
                 border.width: 3
                 RowLayout {
                     anchors.fill: parent
-                    anchors.margins: 10
-                    spacing: 12
+                    anchors.margins: 9
+                    spacing: 10
                     BusyIndicator { running: snapshotController.busy; visible: running; implicitWidth: 32; implicitHeight: 32; palette.highlight: window.blue }
                     Rectangle { implicitWidth: 8; Layout.fillHeight: true; color: window.blue }
-                    Label { text: snapshotController.status; color: window.ink; Layout.fillWidth: true; wrapMode: Text.Wrap; font.weight: Font.Medium }
-                    BrutalButton {
-                        text: qsTr("Preview cleanup")
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label { text: qsTr("BATCH OPERATIONS"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 14; font.weight: Font.Bold; font.letterSpacing: 0.9 }
+                        Label { text: snapshotController.status; color: window.muted; Layout.fillWidth: true; wrapMode: Text.Wrap; font.pixelSize: 10; font.weight: Font.Medium; maximumLineCount: 2; elide: Text.ElideRight }
+                    }
+                    BatchButton {
+                        step: "01"
+                        actionLabel: qsTr("BATCH PREVIEW")
+                        detail: snapshotController.repositoryCount > 0
+                                ? qsTr("%1 REPOSITORIES · READ ONLY").arg(snapshotController.repositoryCount)
+                                : qsTr("SCAN REQUIRED")
                         fillColor: window.blue
                         foregroundColor: window.white
                         hoverForegroundColor: window.blue
                         enabled: !snapshotController.busy && snapshotController.repositoryCount > 0
                         onClicked: snapshotController.previewCleanup()
                     }
-                    BrutalButton {
-                        text: qsTr("Clean now")
+                    Label { text: ">"; color: snapshotController.hasPlan ? window.ink : window.muted; font.family: "Space Grotesk"; font.pixelSize: 24; font.weight: Font.Bold }
+                    BatchButton {
+                        step: "02"
+                        actionLabel: qsTr("BATCH CLEAN")
+                        detail: snapshotController.hasPlan
+                                ? qsTr("%1 TREES READY TO RELEASE").arg(snapshotController.planRemoveTrees)
+                                : qsTr("LOCKED · RUN PREVIEW FIRST")
                         fillColor: window.red
                         foregroundColor: window.white
                         hoverForegroundColor: window.red
@@ -585,7 +723,7 @@ ApplicationWindow {
             color: window.red
             border.color: window.ink
             border.width: 3
-            Label { anchors.fill: parent; anchors.margins: 17; text: qsTr("CONFIRM DESTRUCTIVE CLEANUP"); color: window.white; font.family: "Space Grotesk"; font.pixelSize: 22; font.weight: Font.Bold; verticalAlignment: Text.AlignVCenter }
+            Label { anchors.fill: parent; anchors.margins: 17; text: qsTr("CONFIRM BATCH CLEANUP"); color: window.white; font.family: "Space Grotesk"; font.pixelSize: 22; font.weight: Font.Bold; verticalAlignment: Text.AlignVCenter }
         }
         footer: Item {
             implicitHeight: 72
@@ -595,7 +733,7 @@ ApplicationWindow {
                 spacing: 12
                 BrutalButton { text: qsTr("Cancel"); fillColor: window.paper; hoverForegroundColor: window.paper; onClicked: confirmDialog.reject() }
                 BrutalButton {
-                    text: qsTr("Clean now")
+                    text: qsTr("Batch clean")
                     fillColor: window.red
                     foregroundColor: window.white
                     hoverForegroundColor: window.red
@@ -608,7 +746,7 @@ ApplicationWindow {
         }
         contentItem: ColumnLayout {
             spacing: 14
-            Label { Layout.fillWidth: true; text: qsTr("This protects retained trees with private Git refs, then prunes unreachable Git/LFS data according to the preview."); color: window.ink; wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; text: qsTr("This applies the reviewed plan across all %1 repositories. Retained trees are protected with private Git refs before unreachable Git/LFS data is pruned.").arg(snapshotController.repositoryCount); color: window.ink; wrapMode: Text.Wrap }
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: warningLabel.implicitHeight + 24
@@ -623,4 +761,10 @@ ApplicationWindow {
     }
 
     Component.onCompleted: snapshotController.scan()
+
+    Rectangle { anchors.fill: parent; color: "transparent"; border.color: window.ink; border.width: 3; z: 1000 }
+    MouseArea { anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 5; cursorShape: Qt.SizeHorCursor; z: 1001; onPressed: window.startSystemResize(Qt.LeftEdge) }
+    MouseArea { anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom; width: 5; cursorShape: Qt.SizeHorCursor; z: 1001; onPressed: window.startSystemResize(Qt.RightEdge) }
+    MouseArea { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 5; cursorShape: Qt.SizeVerCursor; z: 1001; onPressed: window.startSystemResize(Qt.TopEdge) }
+    MouseArea { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 5; cursorShape: Qt.SizeVerCursor; z: 1001; onPressed: window.startSystemResize(Qt.BottomEdge) }
 }

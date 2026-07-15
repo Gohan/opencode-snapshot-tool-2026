@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '0.1.0',
+    [string]$Version = '0.1.1',
     [string]$QtRoot = $env:QT_ROOT
 )
 
@@ -45,4 +45,3 @@ Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $archive -Compr
 $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $archive
 Write-Output "Package: $archive"
 Write-Output "SHA256: $($hash.Hash.ToLowerInvariant())"
-

@@ -11,12 +11,13 @@ A cross-platform Qt 6 desktop application for inspecting OpenCode snapshot stora
 - Always protects the current Git index tree.
 - Reports missing paths, database failures, and unmapped historical records without hiding partial results.
 - Produces a read-only cleanup preview before enabling the cleanup action.
+- Presents cleanup as an explicit two-step batch flow across all scanned repositories: batch preview first, then batch clean for the reviewed plan.
 - Protects retained trees with private refs before Git GC, fails closed on uncertain LFS reachability, and removes only stale temporary files.
 
 The default paths are discovered from `OPENCODE_DATA_HOME`, `XDG_DATA_HOME`, or the platform's normal OpenCode data directory. Settings are editable and persisted locally.
 Configurable cleanup options include the recent retention window, per-repository fallback count, full GC versus prune-only behavior, LFS pruning, and the stale temporary-file threshold.
 
-The interface follows the Bauhaus / Neo-Brutalist system in [`design.md`](design.md): warm paper surfaces, solid geometry, thick borders, explicit high-contrast control colors, and no platform-theme-dependent button styling. Space Grotesk and Inter are bundled under the SIL Open Font License.
+The interface follows the Bauhaus / Neo-Brutalist system in [`design.md`](design.md): warm paper surfaces, solid geometry, thick borders, explicit high-contrast control colors, and fully custom application window chrome. Space Grotesk and Inter are bundled under the SIL Open Font License.
 
 ## Build
 
@@ -27,7 +28,7 @@ Windows (MSVC and Qt are discovered; set `QT_ROOT` to override):
 ```powershell
 pwsh -NoProfile -File .\scripts\build.ps1 -Preset dev -Test
 pwsh -NoProfile -File .\scripts\build.ps1 -Preset release -Deploy
-pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.1.0
+pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.1.1
 ```
 
 If the test dependency cannot be downloaded, the GUI can still be built independently:
