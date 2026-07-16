@@ -24,6 +24,11 @@ struct SnapshotInfo {
   QString keepReason;
 };
 
+struct RepositoryFileInfo {
+  QString relativePath;
+  qint64 bytes = 0;
+};
+
 struct RepositoryInfo {
   QString gitDir;
   QString relativePath;
@@ -35,6 +40,7 @@ struct RepositoryInfo {
   qint64 tempPackBytes = 0;
   int looseObjects = 0;
   int packedObjects = 0;
+  QVector<RepositoryFileInfo> largestFiles;
   QVector<SnapshotInfo> snapshots;
 };
 

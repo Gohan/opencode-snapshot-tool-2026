@@ -15,7 +15,11 @@ using namespace ost::core;
 SnapshotController::SnapshotController(QObject* parent) : QObject(parent), settings_(AppSettingsStore().load()) {
   connect(&scanWatcher_, &QFutureWatcher<ScanResult>::finished, this, [this] {
     scanResult_ = scanWatcher_.result();
-    selectedRepository_ = scanResult_.repositories.isEmpty() ? -1 : 0;
+    selectedRepository_ = -1;
+    for (int index = 0; index < scanResult_.repositories.size(); ++index)
+      if (selectedRepository_ < 0 || scanResult_.repositories[index].actualBytes >
+                                         scanResult_.repositories[selectedRepository_].actualBytes)
+        selectedRepository_ = index;
     cleanupPlan_ = {};
     auto message = tr("Found %1 repositories and %2 snapshot records")
                        .arg(repositoryCount()).arg(snapshotCount());
@@ -80,7 +84,13 @@ int SnapshotController::dropCount() const { return snapshotCount() - keepCount()
 
 QVariantList SnapshotController::repositories() const {
   QVariantList rows;
-  for (int index = 0; index < scanResult_.repositories.size(); ++index) {
+  QVector<int> indices;
+  indices.reserve(scanResult_.repositories.size());
+  for (int index = 0; index < scanResult_.repositories.size(); ++index) indices.push_back(index);
+  std::sort(indices.begin(), indices.end(), [this](int left, int right) {
+    return scanResult_.repositories[left].actualBytes > scanResult_.repositories[right].actualBytes;
+  });
+  for (const int index : indices) {
     const auto& repo = scanResult_.repositories[index];
     int kept = 0;
     for (const auto& item : repo.snapshots) if (item.keep) ++kept;
@@ -90,6 +100,85 @@ QVariantList SnapshotController::repositories() const {
                                {"kept", kept}, {"dropped", repo.snapshots.size() - kept}});
   }
   return rows;
+}
+
+QVariantMap SnapshotController::selectedRepositoryDetails() const {
+  if (selectedRepository_ < 0 || selectedRepository_ >= scanResult_.repositories.size())
+    return {{"valid", false}};
+
+  const auto& repo = scanResult_.repositories[selectedRepository_];
+  const auto metadataBytes = std::max<qint64>(
+      0, repo.actualBytes - repo.gitObjectBytes - repo.lfsBytes - repo.tempPackBytes);
+  const auto percent = [total = repo.actualBytes](qint64 bytes) {
+    return total > 0 ? static_cast<double>(bytes) * 100.0 / static_cast<double>(total) : 0.0;
+  };
+  const QVariantList categories{
+      QVariantMap{{"label", tr("Git objects")}, {"bytes", repo.gitObjectBytes},
+                  {"bytesText", formatBytes(repo.gitObjectBytes)}, {"percent", percent(repo.gitObjectBytes)},
+                  {"color", QStringLiteral("#0055ff")}},
+      QVariantMap{{"label", tr("Git LFS")}, {"bytes", repo.lfsBytes},
+                  {"bytesText", formatBytes(repo.lfsBytes)}, {"percent", percent(repo.lfsBytes)},
+                  {"color", QStringLiteral("#ffcc00")}},
+      QVariantMap{{"label", tr("Temporary packs")}, {"bytes", repo.tempPackBytes},
+                  {"bytesText", formatBytes(repo.tempPackBytes)}, {"percent", percent(repo.tempPackBytes)},
+                  {"color", QStringLiteral("#e63b2e")}},
+      QVariantMap{{"label", tr("Metadata")}, {"bytes", metadataBytes},
+                  {"bytesText", formatBytes(metadataBytes)}, {"percent", percent(metadataBytes)},
+                  {"color", QStringLiteral("#1a1a1a")}},
+  };
+
+  const qint64 dominantBytes = std::max({repo.gitObjectBytes, repo.lfsBytes,
+                                         repo.tempPackBytes, metadataBytes});
+  QString explanation;
+  if (repo.actualBytes == 0)
+    explanation = tr("This snapshot repository is empty.");
+  else if (dominantBytes == repo.gitObjectBytes)
+    explanation = tr("Git objects dominate this repository. Pack data is shared by retained trees; releasing a snapshot record only frees objects that no retained or current tree can reach.");
+  else if (dominantBytes == repo.lfsBytes)
+    explanation = tr("Git LFS objects dominate this repository. An LFS object is removable only when none of the retained trees references its SHA-256 object ID.");
+  else if (dominantBytes == repo.tempPackBytes)
+    explanation = tr("Temporary Git pack files dominate this repository. Stale temporary packs are directly removable after the configured age threshold.");
+  else
+    explanation = tr("Repository metadata dominates this repository. This includes the index, refs, configuration, logs, and other non-object Git files.");
+
+  QVariantList largestFiles;
+  for (const auto& file : repo.largestFiles)
+    largestFiles.push_back(QVariantMap{{"path", QDir::fromNativeSeparators(file.relativePath)},
+                                       {"bytes", file.bytes}, {"bytesText", formatBytes(file.bytes)}});
+  if (!repo.largestFiles.isEmpty())
+    explanation += tr(" Largest file: %1 (%2).")
+                       .arg(QDir::fromNativeSeparators(repo.largestFiles.front().relativePath),
+                            formatBytes(repo.largestFiles.front().bytes));
+
+  int duplicateWorktrees = 0;
+  qint64 combinedWorktreeBytes = repo.actualBytes;
+  auto comparableWorktree = QDir::cleanPath(repo.worktree);
+#ifdef Q_OS_WIN
+  comparableWorktree = comparableWorktree.toLower();
+#endif
+  if (!repo.worktree.isEmpty()) {
+    for (int index = 0; index < scanResult_.repositories.size(); ++index) {
+      if (index == selectedRepository_) continue;
+      auto otherWorktree = QDir::cleanPath(scanResult_.repositories[index].worktree);
+#ifdef Q_OS_WIN
+      otherWorktree = otherWorktree.toLower();
+#endif
+      if (otherWorktree != comparableWorktree) continue;
+      ++duplicateWorktrees;
+      combinedWorktreeBytes += scanResult_.repositories[index].actualBytes;
+    }
+  }
+  if (duplicateWorktrees > 0)
+    explanation += tr(" %1 other snapshot repository points to the same worktree; together they use %2.")
+                       .arg(duplicateWorktrees).arg(formatBytes(combinedWorktreeBytes));
+
+  return {{"valid", true}, {"name", repo.relativePath}, {"worktree", repo.worktree},
+          {"gitDir", repo.gitDir}, {"totalBytes", repo.actualBytes},
+          {"totalBytesText", formatBytes(repo.actualBytes)}, {"categories", categories},
+          {"looseObjects", repo.looseObjects}, {"packedObjects", repo.packedObjects},
+          {"largestFiles", largestFiles}, {"duplicateWorktrees", duplicateWorktrees},
+          {"combinedWorktreeBytesText", formatBytes(combinedWorktreeBytes)},
+          {"explanation", explanation}};
 }
 
 QVariantList SnapshotController::snapshots() const {

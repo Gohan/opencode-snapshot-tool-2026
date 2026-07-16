@@ -40,14 +40,6 @@ bool within(const QString& path, const QString& parent) {
   return child.startsWith(root);
 }
 
-qint64 parseKiB(const QByteArray& output, const QByteArray& key) {
-  for (const auto& line : output.split('\n')) {
-    if (!line.startsWith(key + ':')) continue;
-    return line.mid(key.size() + 1).trimmed().toLongLong() * 1024;
-  }
-  return 0;
-}
-
 int parseCount(const QByteArray& output, const QByteArray& key) {
   for (const auto& line : output.split('\n')) {
     if (!line.startsWith(key + ':')) continue;
@@ -145,24 +137,33 @@ ScanResult SnapshotScanner::scan(const QString& snapshotRoot, const QString& dat
 
         const auto lfsPrefix = QDir::fromNativeSeparators(
             QDir(gitDir).filePath(QStringLiteral("lfs/objects/")));
+        const auto objectsPrefix = QDir::fromNativeSeparators(
+            QDir(gitDir).filePath(QStringLiteral("objects/")));
         QDirIterator files(gitDir, QDir::Files | QDir::Hidden | QDir::System,
                            QDirIterator::Subdirectories);
         while (files.hasNext()) {
           files.next();
           const auto info = files.fileInfo();
+          const auto filePath = QDir::fromNativeSeparators(info.absoluteFilePath());
+          const bool temporaryPack = info.fileName().startsWith(QStringLiteral("tmp_pack_")) &&
+                                     info.dir().dirName() == QStringLiteral("pack");
           repository.actualBytes += info.size();
-          if (QDir::fromNativeSeparators(info.absoluteFilePath()).startsWith(lfsPrefix))
+          if (filePath.startsWith(lfsPrefix))
             repository.lfsBytes += info.size();
-          if (info.fileName().startsWith(QStringLiteral("tmp_pack_")) &&
-              info.dir().dirName() == QStringLiteral("pack"))
+          else if (temporaryPack)
             repository.tempPackBytes += info.size();
+          else if (filePath.startsWith(objectsPrefix))
+            repository.gitObjectBytes += info.size();
+          repository.largestFiles.push_back(
+              {QDir(gitDir).relativeFilePath(info.absoluteFilePath()), info.size()});
+          std::sort(repository.largestFiles.begin(), repository.largestFiles.end(),
+                    [](const auto& left, const auto& right) { return left.bytes > right.bytes; });
+          if (repository.largestFiles.size() > 5) repository.largestFiles.resize(5);
         }
 
         const auto counts = git_.run(gitDir, {QStringLiteral("count-objects"), QStringLiteral("-v")}, {}, 15000);
         repository.looseObjects = parseCount(counts.output, QByteArrayLiteral("count"));
         repository.packedObjects = parseCount(counts.output, QByteArrayLiteral("in-pack"));
-        repository.gitObjectBytes = parseKiB(counts.output, QByteArrayLiteral("size")) +
-                                    parseKiB(counts.output, QByteArrayLiteral("size-pack"));
         return repository;
       });
 

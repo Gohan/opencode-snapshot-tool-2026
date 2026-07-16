@@ -521,6 +521,8 @@ ApplicationWindow {
             }
 
             BrutalPanel {
+                id: repositoryDetailPanel
+                property var details: snapshotController.selectedRepositoryDetails
                 SplitView.fillWidth: true
                 SplitView.minimumWidth: 610
                 ColumnLayout {
@@ -535,11 +537,101 @@ ApplicationWindow {
                             anchors.fill: parent
                             anchors.leftMargin: 15
                             anchors.rightMargin: 15
-                            Label { text: qsTr("SNAPSHOTS"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 18; font.weight: Font.Bold; Layout.fillWidth: true }
-                            Rectangle { implicitWidth: 13; implicitHeight: 13; color: window.ink }
-                            Label { text: qsTr("RETAINED"); color: window.ink; font.pixelSize: 10; font.weight: Font.Bold }
-                            Rectangle { implicitWidth: 13; implicitHeight: 13; color: window.red; border.color: window.ink; border.width: 2 }
-                            Label { text: qsTr("RELEASED"); color: window.ink; font.pixelSize: 10; font.weight: Font.Bold }
+                            Label { text: qsTr("REPOSITORY STORAGE"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 18; font.weight: Font.Bold; Layout.fillWidth: true }
+                            Label { text: repositoryDetailPanel.details.valid ? repositoryDetailPanel.details.totalBytesText : "—"; color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 20; font.weight: Font.Bold }
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 242
+                        visible: repositoryDetailPanel.details.valid
+                        color: window.paper
+                        border.color: window.ink
+                        border.width: 0
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 15
+                            anchors.rightMargin: 15
+                            anchors.topMargin: 11
+                            anchors.bottomMargin: 10
+                            spacing: 8
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 14
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 1
+                                    Label { Layout.fillWidth: true; text: repositoryDetailPanel.details.name || ""; color: window.ink; elide: Text.ElideMiddle; font.family: "Space Grotesk"; font.pixelSize: 14; font.weight: Font.Bold }
+                                    Label { Layout.fillWidth: true; text: repositoryDetailPanel.details.worktree || qsTr("Worktree unknown"); color: window.muted; elide: Text.ElideMiddle; font.pixelSize: 10 }
+                                }
+                                Label { text: qsTr("%1 LOOSE  /  %2 PACKED").arg(repositoryDetailPanel.details.looseObjects || 0).arg(repositoryDetailPanel.details.packedObjects || 0); color: window.ink; font.pixelSize: 9; font.weight: Font.Bold }
+                            }
+                            Row {
+                                id: storageBar
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 18
+                                spacing: 0
+                                Repeater {
+                                    model: repositoryDetailPanel.details.categories || []
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        width: storageBar.width * modelData.percent / 100
+                                        height: storageBar.height
+                                        color: modelData.color
+                                        border.color: window.ink
+                                        border.width: modelData.bytes > 0 ? 1 : 0
+                                    }
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 7
+                                Repeater {
+                                    model: repositoryDetailPanel.details.categories || []
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        implicitHeight: 55
+                                        color: window.paper
+                                        border.color: window.ink
+                                        border.width: 2
+                                        Rectangle { width: 7; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.color }
+                                        Column {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 14
+                                            anchors.rightMargin: 6
+                                            anchors.topMargin: 6
+                                            spacing: 1
+                                            Label { width: parent.width; text: modelData.label.toUpperCase(); color: window.ink; elide: Text.ElideRight; font.pixelSize: 8; font.weight: Font.Bold }
+                                            Label { width: parent.width; text: modelData.bytesText + "  ·  " + Math.round(modelData.percent) + "%"; color: window.ink; elide: Text.ElideRight; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold }
+                                        }
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: 70
+                                color: repositoryDetailPanel.details.duplicateWorktrees > 0 ? window.yellow : "#e8e1d6"
+                                border.color: window.ink
+                                border.width: 2
+                                Rectangle { width: 7; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: window.blue }
+                                Label { anchors.fill: parent; anchors.leftMargin: 16; anchors.rightMargin: 9; anchors.topMargin: 6; anchors.bottomMargin: 6; text: repositoryDetailPanel.details.explanation || ""; color: window.ink; wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight; font.pixelSize: 9; font.weight: Font.Medium; verticalAlignment: Text.AlignVCenter }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 36
+                        color: window.ink
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 13
+                            anchors.rightMargin: 13
+                            Label { text: qsTr("SNAPSHOT RECORDS"); color: window.white; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold; Layout.fillWidth: true }
+                            Rectangle { implicitWidth: 11; implicitHeight: 11; color: window.yellow; border.color: window.white; border.width: 1 }
+                            Label { text: qsTr("RETAINED"); color: window.white; font.pixelSize: 8; font.weight: Font.Bold }
+                            Rectangle { implicitWidth: 11; implicitHeight: 11; color: window.red; border.color: window.white; border.width: 1 }
+                            Label { text: qsTr("RELEASED"); color: window.white; font.pixelSize: 8; font.weight: Font.Bold }
                         }
                     }
                     ListView {

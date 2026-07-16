@@ -7,6 +7,7 @@
 #include <QFutureWatcher>
 #include <QObject>
 #include <QVariantList>
+#include <QVariantMap>
 
 class SnapshotController final : public QObject {
   Q_OBJECT
@@ -21,6 +22,7 @@ class SnapshotController final : public QObject {
   Q_PROPERTY(QString status READ status NOTIFY statusChanged)
   Q_PROPERTY(QVariantList repositories READ repositories NOTIFY dataChanged)
   Q_PROPERTY(QVariantList snapshots READ snapshots NOTIFY dataChanged)
+  Q_PROPERTY(QVariantMap selectedRepositoryDetails READ selectedRepositoryDetails NOTIFY dataChanged)
   Q_PROPERTY(int selectedRepository READ selectedRepository WRITE setSelectedRepository NOTIFY dataChanged)
   Q_PROPERTY(qint64 totalBytes READ totalBytes NOTIFY dataChanged)
   Q_PROPERTY(int repositoryCount READ repositoryCount NOTIFY dataChanged)
@@ -46,6 +48,7 @@ class SnapshotController final : public QObject {
   QString status() const;
   QVariantList repositories() const;
   QVariantList snapshots() const;
+  QVariantMap selectedRepositoryDetails() const;
   int selectedRepository() const;
   qint64 totalBytes() const;
   int repositoryCount() const;
