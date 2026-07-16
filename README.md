@@ -4,6 +4,8 @@ A cross-platform Qt 6 desktop application for inspecting OpenCode snapshot stora
 
 ![OpenCode Snapshot Tool repository storage details](docs/images/repository-storage-details-preview.png)
 
+See the [implementation report](docs/implementation-report.md) for the complete change summary, current screenshots, verification results, and remaining user-acceptance checks.
+
 ## What it does
 
 - Scans both legacy and project/worktree snapshot layouts.

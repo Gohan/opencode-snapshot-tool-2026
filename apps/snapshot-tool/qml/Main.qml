@@ -3,13 +3,16 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 
 ApplicationWindow {
     id: window
-    width: 1440
-    height: 900
-    minimumWidth: 1080
-    minimumHeight: 720
+    width: Math.min(1440, Screen.desktopAvailableWidth)
+    height: Math.min(900, Screen.desktopAvailableHeight)
+    minimumWidth: Math.min(1080, Screen.desktopAvailableWidth)
+    minimumHeight: Math.min(720, Screen.desktopAvailableHeight)
+    x: Screen.virtualX + Math.max(0, Math.round((Screen.desktopAvailableWidth - width) / 2))
+    y: Screen.virtualY + Math.max(0, Math.round((Screen.desktopAvailableHeight - height) / 2))
     visible: true
     title: qsTr("OpenCode Snapshot Tool")
     color: paper
@@ -669,7 +672,8 @@ ApplicationWindow {
                                 }
                             }
                         }
-                        Item {
+                        Rectangle {
+                            color: window.paper
                             ColumnLayout {
                                 anchors.fill: parent
                                 anchors.margins: 12
@@ -740,7 +744,8 @@ ApplicationWindow {
                                 }
                             }
                         }
-                        Item {
+                        Rectangle {
+                            color: window.paper
                             ColumnLayout {
                                 anchors.fill: parent
                                 anchors.margins: 12
@@ -793,7 +798,8 @@ ApplicationWindow {
                                 }
                             }
                         }
-                        Item {
+                        Rectangle {
+                            color: window.paper
                             ColumnLayout {
                                 anchors.fill: parent
                                 anchors.margins: 12
@@ -867,7 +873,8 @@ ApplicationWindow {
                                 }
                             }
                         }
-                        Item {
+                        Rectangle {
+                            color: window.paper
                             ColumnLayout {
                                 anchors.fill: parent
                                 spacing: 0
@@ -927,7 +934,8 @@ ApplicationWindow {
                                 }
                             }
                         }
-                        Item {
+                        Rectangle {
+                            color: window.paper
                             ColumnLayout {
                                 anchors.fill: parent
                                 anchors.margins: 12
