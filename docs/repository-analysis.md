@@ -42,7 +42,7 @@ Before full purge, the tool:
 1. canonicalizes both the configured snapshot root and selected gitdir and requires the target to be a strict child of the root;
 2. validates that the live index can still be written;
 3. produces a project-only preview using the measured complete directory size;
-4. requires OpenCode-closed acknowledgement and exact project-name entry;
+4. requires OpenCode-closed acknowledgement and a short action-word entry (`RESET` or `PURGE`);
 5. repeats path, Git-lock, and live-index validation immediately before removal.
 
 The live-index validation uses `git write-tree`. It does not change worktree files or release history during preview, but Git may materialize the current tree object in the snapshot object database; the UI therefore treats it as a non-destructive validation preview rather than promising zero filesystem writes.

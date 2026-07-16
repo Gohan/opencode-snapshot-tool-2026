@@ -1178,6 +1178,8 @@ ApplicationWindow {
         property bool resetMode: snapshotController.projectPlanMode === "reset"
         property bool purgeMode: snapshotController.projectPlanMode === "purge"
         property bool destructiveMode: resetMode || purgeMode
+        property string confirmationWord: purgeMode ? "PURGE" : resetMode ? "RESET" : ""
+        property bool confirmationMatches: !destructiveMode || projectActionConfirm.text.trim().toUpperCase() === confirmationWord
         modal: true
         anchors.centerIn: Overlay.overlay
         width: Math.min(window.width - 80, 760)
@@ -1185,7 +1187,7 @@ ApplicationWindow {
         closePolicy: Popup.CloseOnEscape
         onOpened: {
             projectClosedCheck.checked = false
-            projectNameConfirm.text = ""
+            projectActionConfirm.text = ""
         }
         Overlay.modal: Rectangle { color: "#991a1a1a" }
         background: Rectangle { color: window.paper; border.color: window.ink; border.width: 3 }
@@ -1217,7 +1219,7 @@ ApplicationWindow {
                     fillColor: projectConfirmDialog.destructiveMode ? window.red : window.yellow
                     foregroundColor: projectConfirmDialog.destructiveMode ? window.white : window.ink
                     hoverForegroundColor: projectConfirmDialog.destructiveMode ? window.red : window.yellow
-                    enabled: projectClosedCheck.checked && (!projectConfirmDialog.destructiveMode || projectNameConfirm.text === repositoryDetailPanel.details.name)
+                    enabled: projectClosedCheck.checked && projectConfirmDialog.confirmationMatches
                     onClicked: {
                         projectConfirmDialog.accept()
                         snapshotController.executeProjectAction()
@@ -1271,8 +1273,23 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 visible: projectConfirmDialog.destructiveMode
                 spacing: 6
-                Label { Layout.fillWidth: true; text: projectConfirmDialog.purgeMode ? qsTr("TYPE THE EXACT PROJECT NAME TO ENABLE FULL PURGE") : qsTr("TYPE THE EXACT PROJECT NAME TO ENABLE RESET"); color: window.red; wrapMode: Text.Wrap; font.weight: Font.Bold; font.letterSpacing: 0.5 }
-                BrutalField { id: projectNameConfirm; Layout.fillWidth: true; placeholderText: repositoryDetailPanel.details.name }
+                Label {
+                    Layout.fillWidth: true
+                    text: projectConfirmDialog.purgeMode
+                          ? qsTr("TYPE PURGE TO DELETE THIS SNAPSHOT STORE")
+                          : qsTr("TYPE RESET TO DISCARD SNAPSHOT HISTORY")
+                    color: window.red
+                    wrapMode: Text.Wrap
+                    font.weight: Font.Bold
+                    font.letterSpacing: 0.5
+                }
+                BrutalField {
+                    id: projectActionConfirm
+                    Layout.fillWidth: true
+                    placeholderText: projectConfirmDialog.confirmationWord
+                    maximumLength: 8
+                    inputMethodHints: Qt.ImhUppercaseOnly | Qt.ImhNoPredictiveText
+                }
             }
             Label { Layout.fillWidth: true; text: projectConfirmDialog.purgeMode ? qsTr("Execution canonicalizes the selected path, refuses anything outside the configured snapshot root, refuses Git locks, validates the live index again, and removes only this snapshot Git directory.") : projectConfirmDialog.resetMode ? qsTr("Execution refuses a history reset if Git lock files are present. The current index tree is checked again and protected immediately before cleanup.") : qsTr("Execution rechecks and protects the live index tree before pruning anything not reachable from the reviewed keep set."); color: window.muted; wrapMode: Text.Wrap; font.pixelSize: 10 }
         }
