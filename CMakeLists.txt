@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(opencode-snapshot-tool-2026 VERSION 0.1.2 LANGUAGES CXX)
+project(opencode-snapshot-tool-2026 VERSION 0.1.3 LANGUAGES CXX)
 
 if(WIN32)
   enable_language(RC)

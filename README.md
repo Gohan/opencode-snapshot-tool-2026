@@ -36,7 +36,7 @@ Windows (MSVC and Qt are discovered; set `QT_ROOT` to override):
 ```powershell
 pwsh -NoProfile -File .\scripts\build.ps1 -Preset dev -Test
 pwsh -NoProfile -File .\scripts\build.ps1 -Preset release -Deploy
-pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.1.2
+pwsh -NoProfile -File .\scripts\package-windows.ps1 -Version 0.1.3
 ```
 
 If the test dependency cannot be downloaded, the GUI can still be built independently:
