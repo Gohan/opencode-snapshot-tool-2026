@@ -229,62 +229,67 @@ ScanResult SnapshotScanner::scan(const QString& snapshotRoot, const QString& dat
   QSqlDatabase::removeDatabase(connectionName);
   if (progress) progress(QStringLiteral("Loaded %1 distinct database snapshots").arg(databaseSnapshots.size()));
 
-  QVector<SnapshotInfo> unresolvedSnapshots;
-  for (auto item : databaseSnapshots) {
-    const auto candidates = repositoriesByProject.value(item.projectId);
-    QVector<int> exact;
-    QVector<int> containing;
-    for (const int index : candidates) {
+  QVector<QVector<int>> candidatesBySnapshot(databaseSnapshots.size());
+  QHash<int, QStringList> hashesByRepository;
+  for (int itemIndex = 0; itemIndex < databaseSnapshots.size(); ++itemIndex) {
+    const auto& item = databaseSnapshots[itemIndex];
+    QVector<int> candidates;
+    const auto appendCandidate = [&](int index) {
+      if (!candidates.contains(index)) candidates.push_back(index);
+    };
+
+    // Prefer the repository encoded by the current project id, but do not trust
+    // identity alone: OpenCode can migrate a worktree to a new project id while
+    // older tree objects remain in the legacy snapshot store.
+    for (const int index : repositoriesByProject.value(item.projectId)) {
       const auto& repository = result.repositories[index];
       if (repository.worktree.isEmpty()) continue;
-      if (normalizedPath(repository.worktree) == normalizedPath(item.directory))
-        exact.push_back(index);
-      else if (within(item.directory, repository.worktree))
-        containing.push_back(index);
+      if (normalizedPath(repository.worktree) == normalizedPath(item.directory) ||
+          within(item.directory, repository.worktree))
+        appendCandidate(index);
     }
-    const int chosen = exact.size() == 1 ? exact.front()
-                       : (exact.isEmpty() && containing.size() == 1 ? containing.front() : -1);
-    if (chosen < 0) {
-      unresolvedSnapshots.push_back(item);
-      continue;
+    for (int index = 0; index < result.repositories.size(); ++index) {
+      const auto& repository = result.repositories[index];
+      if (repository.worktree.isEmpty()) continue;
+      if (normalizedPath(repository.worktree) == normalizedPath(item.directory) ||
+          within(item.directory, repository.worktree))
+        appendCandidate(index);
     }
-    item.exists = true;
-    result.repositories[chosen].snapshots.push_back(item);
+
+    candidatesBySnapshot[itemIndex] = candidates;
+    for (const int index : candidates) hashesByRepository[index].push_back(item.hash);
   }
 
   QHash<int, QSet<QString>> available;
   int checkedRepository = 0;
-  int repositoriesToCheck = 0;
-  for (auto it = repositoriesByProject.cbegin(); it != repositoriesByProject.cend(); ++it) {
-    const bool needed = std::any_of(unresolvedSnapshots.cbegin(), unresolvedSnapshots.cend(),
-                                    [&](const auto& item) { return item.projectId == it.key(); });
-    if (needed) repositoriesToCheck += it.value().size();
-  }
-  for (auto it = repositoriesByProject.cbegin(); it != repositoriesByProject.cend(); ++it) {
-    QStringList hashes;
-    for (const auto& item : unresolvedSnapshots)
-      if (item.projectId == it.key()) hashes.push_back(item.hash);
+  const int repositoriesToCheck = hashesByRepository.size();
+  for (auto it = hashesByRepository.cbegin(); it != hashesByRepository.cend(); ++it) {
+    QStringList hashes = it.value();
     if (hashes.isEmpty()) continue;
     hashes.removeDuplicates();
     const QByteArray input = hashes.join(QChar('\n')).toLatin1() + '\n';
-    for (const int repoIndex : it.value()) {
-      if (progress) progress(QStringLiteral("Resolving ambiguous snapshot repository %1 of %2")
-                               .arg(++checkedRepository).arg(repositoriesToCheck));
-      const auto checked = git_.run(result.repositories[repoIndex].gitDir,
-                                    {QStringLiteral("cat-file"),
-                                     QStringLiteral("--batch-check=%(objectname) %(objecttype)")}, input, 30000);
-      for (const auto& row : checked.output.split('\n')) {
-        const auto fields = row.trimmed().split(' ');
-        if (fields.size() == 2 && fields[1] == "tree") available[repoIndex].insert(QString::fromLatin1(fields[0]));
-      }
+    const int repoIndex = it.key();
+    if (progress) progress(QStringLiteral("Verifying snapshot repository %1 of %2")
+                             .arg(++checkedRepository).arg(repositoriesToCheck));
+    const auto checked = git_.run(result.repositories[repoIndex].gitDir,
+                                  {QStringLiteral("cat-file"),
+                                   QStringLiteral("--batch-check=%(objectname) %(objecttype)")}, input, 30000);
+    for (const auto& row : checked.output.split('\n')) {
+      const auto fields = row.trimmed().split(' ');
+      if (fields.size() == 2 && fields[1] == "tree")
+        available[repoIndex].insert(QString::fromLatin1(fields[0]));
     }
   }
 
-  for (auto item : unresolvedSnapshots) {
-    const auto candidates = repositoriesByProject.value(item.projectId);
+  for (int itemIndex = 0; itemIndex < databaseSnapshots.size(); ++itemIndex) {
+    auto item = databaseSnapshots[itemIndex];
     int chosen = -1;
-    for (const int index : candidates)
-      if (available[index].contains(item.hash)) { chosen = index; break; }
+    for (const int index : candidatesBySnapshot[itemIndex]) {
+      if (available[index].contains(item.hash)) {
+        chosen = index;
+        break;
+      }
+    }
     if (chosen < 0) {
       ++result.unmappedDatabaseRecords;
       continue;

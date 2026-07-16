@@ -11,7 +11,7 @@
 已确认：
 
 - Qt 应用可完整构建并启动。
-- 12/12 自动化测试通过。
+- 13/13 自动化测试通过。
 - 真实 OpenCode 数据仅执行扫描、深度分析和清理预览，没有执行真实删除。
 - 窗口在 150% DPI 下按当前屏幕可用区域自适应并居中，最终截图尺寸为 2160×1350。
 - 主干未修改，所有变更仍位于 Draft PR 分支。
@@ -121,12 +121,13 @@
 
 ## 8. 自动化验证
 
-本轮重新执行 `ctest --test-dir build/dev --output-on-failure`，结果为 12/12 通过。覆盖范围包括：
+本轮重新执行 `ctest --test-dir build/dev --output-on-failure`，结果为 13/13 通过。覆盖范围包括：
 
 - retention policy 与 current index tree 保护；
 - legacy / two-level snapshot store 发现；
 - Git objects、LFS、temporary packs、metadata 的实际目录计量；
 - 数据库记录、tree 与 session 的映射；
+- 项目 ID 迁移后，按相同 worktree 将旧 tree 映射回真实存在对象的 legacy store；
 - current/history/unprotected packed object 分类；
 - Preview 不写入；
 - Safe GC 只保留计划 tree；
@@ -141,4 +142,3 @@
 - 对一份可丢弃的真实 snapshot store 执行 Safe GC，核对执行前后磁盘占用。
 - 对一份可丢弃的真实 snapshot store 验证 Reset/Purge 后 OpenCode 的 Undo 行为和重新初始化行为。
 - 用户确认后再将 Draft PR 标记为 Ready；在此之前不合并、不发布。
-
