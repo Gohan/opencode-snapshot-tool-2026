@@ -50,7 +50,8 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+D"; enabled: !snapshotController.busy && snapshotController.selectedRepository >= 0; onActivated: snapshotController.analyzeSelectedRepository() }
     Shortcut {
         sequence: "Ctrl+Shift+R"
-        enabled: !snapshotController.busy && snapshotController.selectedRepository >= 0 && repositoryDetailPanel.analysis.ready
+        enabled: !snapshotController.busy && snapshotController.selectedRepository >= 0
+                 && repositoryDetailPanel.analysis.ready && repositoryDetailPanel.details.canClean
         onActivated: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "reset"
                      ? projectConfirmDialog.open() : snapshotController.previewProjectReset()
     }
@@ -519,7 +520,7 @@ ApplicationWindow {
                         delegate: Rectangle {
                             required property var modelData
                             width: repositoryList.width - (repositoryList.ScrollBar.vertical.visible ? 10 : 0)
-                            height: visible ? 88 : 0
+                            height: visible ? 104 : 0
                             visible: repositorySearch.text.length === 0
                                      || modelData.name.toLowerCase().includes(repositorySearch.text.toLowerCase())
                                      || modelData.worktree.toLowerCase().includes(repositorySearch.text.toLowerCase())
@@ -536,7 +537,20 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 anchors.margins: 11
                                 spacing: 5
-                                Label { width: parent.width; text: modelData.name; color: window.ink; elide: Text.ElideMiddle; font.family: "Space Grotesk"; font.pixelSize: 15; font.weight: Font.Bold }
+                                Row {
+                                    width: parent.width
+                                    spacing: 8
+                                    Label { width: Math.max(80, parent.width - activityBadge.width - 8); text: modelData.name; color: window.ink; elide: Text.ElideMiddle; font.family: "Space Grotesk"; font.pixelSize: 15; font.weight: Font.Bold }
+                                    Rectangle {
+                                        id: activityBadge
+                                        width: activityBadgeLabel.implicitWidth + 12
+                                        height: 20
+                                        color: modelData.activity === "active" ? window.red : modelData.activity === "possible" ? window.yellow : window.ink
+                                        border.color: window.ink
+                                        border.width: 2
+                                        Label { id: activityBadgeLabel; anchors.centerIn: parent; text: modelData.activityLabel; color: modelData.activity === "active" ? window.white : modelData.activity === "possible" ? window.ink : window.white; font.pixelSize: 8; font.weight: Font.Bold }
+                                    }
+                                }
                                 Label { width: parent.width; text: modelData.worktree || qsTr("Worktree unknown"); color: window.muted; elide: Text.ElideMiddle; font.pixelSize: 11 }
                                 Row {
                                     spacing: 13
@@ -576,6 +590,14 @@ ApplicationWindow {
                             anchors.leftMargin: 15
                             anchors.rightMargin: 15
                             Label { text: qsTr("REPOSITORY STORAGE"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 18; font.weight: Font.Bold; Layout.fillWidth: true }
+                            Rectangle {
+                                implicitWidth: detailActivityLabel.implicitWidth + 16
+                                implicitHeight: 26
+                                color: repositoryDetailPanel.details.activity === "active" ? window.red : repositoryDetailPanel.details.activity === "possible" ? window.yellow : window.ink
+                                border.color: window.ink
+                                border.width: 2
+                                Label { id: detailActivityLabel; anchors.centerIn: parent; text: repositoryDetailPanel.details.activityLabel || qsTr("INACTIVE"); color: repositoryDetailPanel.details.activity === "possible" ? window.ink : window.white; font.pixelSize: 9; font.weight: Font.Bold }
+                            }
                             Label { text: repositoryDetailPanel.details.valid ? repositoryDetailPanel.details.totalBytesText : "—"; color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 20; font.weight: Font.Bold }
                         }
                     }
@@ -940,6 +962,15 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 anchors.margins: 12
                                 spacing: 8
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: reclaimActivityText.implicitHeight + 24
+                                    color: repositoryDetailPanel.details.activity === "active" ? "#ffd7d1" : repositoryDetailPanel.details.activity === "possible" ? window.yellow : "#dbe8d5"
+                                    border.color: window.ink
+                                    border.width: 3
+                                    Rectangle { width: 10; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: repositoryDetailPanel.details.activity === "active" ? window.red : repositoryDetailPanel.details.activity === "possible" ? window.yellow : window.ink }
+                                    Label { id: reclaimActivityText; anchors.fill: parent; anchors.leftMargin: 23; anchors.rightMargin: 10; anchors.topMargin: 10; anchors.bottomMargin: 10; text: (repositoryDetailPanel.details.activityLabel || qsTr("INACTIVE")) + " — " + (repositoryDetailPanel.details.activityMessage || ""); color: window.ink; wrapMode: Text.Wrap; font.pixelSize: 9; font.weight: Font.Bold }
+                                }
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Rectangle {
@@ -953,7 +984,7 @@ ApplicationWindow {
                                         Layout.fillWidth: true; implicitHeight: 74; color: "#ffd7d1"; border.color: window.ink; border.width: 2
                                         Column { anchors.fill: parent; anchors.margins: 9; spacing: 3
                                             Label { text: qsTr("RESET SNAPSHOT HISTORY"); color: window.red; font.family: "Space Grotesk"; font.pixelSize: 11; font.weight: Font.Bold }
-                                            Label { width: parent.width; text: repositoryDetailPanel.analysis.ready ? qsTr("Current-only estimate: %1. Discards old Undo trees.").arg(repositoryDetailPanel.analysis.resetReclaimableText) : qsTr("Preserve current state, discard old Undo trees. OpenCode must be closed."); color: window.ink; wrapMode: Text.Wrap; font.pixelSize: 9 }
+                                            Label { width: parent.width; text: repositoryDetailPanel.analysis.ready ? qsTr("Current-only estimate: %1. Discards old Undo trees.").arg(repositoryDetailPanel.analysis.resetReclaimableText) : repositoryDetailPanel.details.canClean ? qsTr("Preserve current state and discard old Undo trees. No matching OpenCode process is using this store.") : qsTr("Preserve current state and discard old Undo trees. Close only the matching PID shown above."); color: window.ink; wrapMode: Text.Wrap; font.pixelSize: 9 }
                                         }
                                     }
                                     Rectangle {
@@ -979,7 +1010,7 @@ ApplicationWindow {
                                     BrutalButton {
                                         text: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "safe" ? qsTr("Review safe plan") : qsTr("Preview safe GC")
                                         fillColor: window.yellow
-                                        enabled: !snapshotController.busy
+                                        enabled: !snapshotController.busy && repositoryDetailPanel.details.canClean
                                         onClicked: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "safe" ? projectConfirmDialog.open() : snapshotController.previewProjectCleanup()
                                     }
                                     BrutalButton {
@@ -987,7 +1018,7 @@ ApplicationWindow {
                                         fillColor: window.red
                                         foregroundColor: window.white
                                         hoverForegroundColor: window.red
-                                        enabled: !snapshotController.busy && repositoryDetailPanel.analysis.ready
+                                        enabled: !snapshotController.busy && repositoryDetailPanel.analysis.ready && repositoryDetailPanel.details.canClean
                                         onClicked: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "reset" ? projectConfirmDialog.open() : snapshotController.previewProjectReset()
                                     }
                                     BrutalButton {
@@ -995,7 +1026,7 @@ ApplicationWindow {
                                         fillColor: window.ink
                                         foregroundColor: window.white
                                         hoverForegroundColor: window.ink
-                                        enabled: !snapshotController.busy
+                                        enabled: !snapshotController.busy && repositoryDetailPanel.details.canClean
                                         onClicked: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "purge" ? projectConfirmDialog.open() : snapshotController.previewProjectPurge()
                                     }
                                 }
@@ -1045,7 +1076,7 @@ ApplicationWindow {
                         step: "02"
                         actionLabel: qsTr("BATCH CLEAN")
                         detail: snapshotController.hasPlan
-                                ? qsTr("%1 TREES READY TO RELEASE").arg(snapshotController.planRemoveTrees)
+                                ? qsTr("%1 STORES · %2 SKIPPED").arg(snapshotController.planRepositoryCount).arg(snapshotController.planBlockedCount)
                                 : qsTr("LOCKED · RUN PREVIEW FIRST")
                         fillColor: window.red
                         foregroundColor: window.white
@@ -1167,14 +1198,14 @@ ApplicationWindow {
         }
         contentItem: ColumnLayout {
             spacing: 14
-            Label { Layout.fillWidth: true; text: qsTr("This applies the reviewed plan across all %1 repositories. Retained trees are protected with private Git refs before unreachable Git/LFS data is pruned.").arg(snapshotController.repositoryCount); color: window.ink; wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; text: qsTr("This applies the reviewed plan to %1 inactive snapshot stores. Retained trees are protected with private Git refs before unreachable Git/LFS data is pruned.").arg(snapshotController.planRepositoryCount); color: window.ink; wrapMode: Text.Wrap }
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: warningLabel.implicitHeight + 24
                 color: window.yellow
                 border.color: window.ink
                 border.width: 3
-                Label { id: warningLabel; anchors.fill: parent; anchors.margins: 12; text: qsTr("Close OpenCode or ensure it is idle before continuing. Cleanup cannot be undone from this tool."); color: window.ink; wrapMode: Text.Wrap; font.weight: Font.Bold }
+                Label { id: warningLabel; anchors.fill: parent; anchors.margins: 12; text: snapshotController.planBlockedCount > 0 ? qsTr("%1 active or uncertain stores were excluded: %2. Other OpenCode instances may remain open. Execution rechecks every included store.").arg(snapshotController.planBlockedCount).arg(snapshotController.planBlockedSummary) : qsTr("No included store maps to a running OpenCode process. Other OpenCode projects may remain open; execution rechecks every included store."); color: window.ink; wrapMode: Text.Wrap; font.weight: Font.Bold }
             }
             Label { text: qsTr("PROTECT %1 TREES  /  RELEASE %2 TREES").arg(snapshotController.planKeepTrees).arg(snapshotController.planRemoveTrees); color: window.red; font.family: "Space Grotesk"; font.pixelSize: 18; font.weight: Font.Bold }
             Label { Layout.fillWidth: true; text: qsTr("Directly removable LFS/temp files: %1. Git pack savings are measured after cleanup.").arg(snapshotController.formatBytes(snapshotController.estimatedReclaimableBytes)); color: window.blue; wrapMode: Text.Wrap; font.weight: Font.Bold }
@@ -1194,7 +1225,6 @@ ApplicationWindow {
         padding: 24
         closePolicy: Popup.CloseOnEscape
         onOpened: {
-            projectClosedCheck.checked = false
             projectActionConfirm.text = ""
         }
         Overlay.modal: Rectangle { color: "#991a1a1a" }
@@ -1227,7 +1257,7 @@ ApplicationWindow {
                     fillColor: projectConfirmDialog.destructiveMode ? window.red : window.yellow
                     foregroundColor: projectConfirmDialog.destructiveMode ? window.white : window.ink
                     hoverForegroundColor: projectConfirmDialog.destructiveMode ? window.red : window.yellow
-                    enabled: projectClosedCheck.checked && projectConfirmDialog.confirmationMatches
+                    enabled: projectConfirmDialog.confirmationMatches && repositoryDetailPanel.details.canClean
                     onClicked: {
                         projectConfirmDialog.accept()
                         snapshotController.executeProjectAction()
@@ -1272,10 +1302,13 @@ ApplicationWindow {
                 font.pixelSize: 16
                 font.weight: Font.Bold
             }
-            BrutalCheckBox {
-                id: projectClosedCheck
+            Rectangle {
                 Layout.fillWidth: true
-                text: qsTr("I closed OpenCode and no OpenCode process is using this project")
+                implicitHeight: projectActivityConfirmation.implicitHeight + 24
+                color: "#dbe8d5"
+                border.color: window.ink
+                border.width: 2
+                Label { id: projectActivityConfirmation; anchors.fill: parent; anchors.margins: 12; text: qsTr("Verified inactive at scan time. You do not need to close unrelated OpenCode instances. Execution repeats PID/worktree mapping, checks Git locks, and observes this store for writes before cleanup."); color: window.ink; wrapMode: Text.Wrap; font.weight: Font.Bold }
             }
             ColumnLayout {
                 Layout.fillWidth: true
@@ -1299,7 +1332,7 @@ ApplicationWindow {
                     inputMethodHints: Qt.ImhUppercaseOnly | Qt.ImhNoPredictiveText
                 }
             }
-            Label { Layout.fillWidth: true; text: projectConfirmDialog.purgeMode ? qsTr("Execution canonicalizes the selected path, refuses anything outside the configured snapshot root, refuses Git locks, validates the live index again, and removes only this snapshot Git directory.") : projectConfirmDialog.resetMode ? qsTr("Execution refuses a history reset if Git lock files are present. The current index tree is checked again and protected immediately before cleanup.") : qsTr("Execution rechecks and protects the live index tree before pruning anything not reachable from the reviewed keep set."); color: window.muted; wrapMode: Text.Wrap; font.pixelSize: 10 }
+            Label { Layout.fillWidth: true; text: projectConfirmDialog.purgeMode ? qsTr("Execution refuses a newly active matching PID, paths outside the configured snapshot root, Git locks, or ongoing writes; it validates the live index and removes only this snapshot Git directory.") : projectConfirmDialog.resetMode ? qsTr("Execution refuses a newly active matching PID, Git locks, or ongoing writes. The current index tree is checked again and protected immediately before cleanup.") : qsTr("Execution refuses a newly active matching PID, Git locks, or ongoing writes, then protects the live index tree before pruning anything outside the reviewed keep set."); color: window.muted; wrapMode: Text.Wrap; font.pixelSize: 10 }
         }
     }
 

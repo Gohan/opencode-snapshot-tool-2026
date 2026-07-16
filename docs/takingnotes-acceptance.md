@@ -1,7 +1,7 @@
 # takingNotes 真实数据验收记录
 
-日期：2026-07-16  
-状态：基线完成，等待关闭 OpenCode 后执行  
+日期：2026-07-17
+状态：进程/store 映射验证完成，等待用户执行破坏性验收
 
 ## 目标
 
@@ -51,9 +51,11 @@ Snapshot 根目录：`C:/Users/BZS-AIBOX/.local/share/opencode/snapshot`
 
 ## 执行顺序
 
-### 阶段 A：所有 OpenCode 进程关闭后重新记录执行基线
+### 阶段 A：只关闭与目标 store 匹配的 OpenCode 后重新记录执行基线
 
-- 再次确认 `opencode.exe` 数量为 0；
+- 应用当前识别到 `takingNotes` current store 为 `ACTIVE — PID 145100`；执行 current store 清理前只关闭该 PID 对应实例；
+- legacy store 当前为 `INACTIVE`，其他项目的 OpenCode 实例不需要关闭；
+- 重新 Scan，确认目标 store 显示 `INACTIVE`；
 - 确认两个 store 没有 `.lock` 文件；
 - 记录 `opencode.db` 大小、修改时间与 SHA-256；
 - 记录 `takingNotes` worktree 的 Git status；
@@ -73,7 +75,6 @@ Snapshot 根目录：`C:/Users/BZS-AIBOX/.local/share/opencode/snapshot`
 3. 启动 OpenCode 并触发一次正常 snapshot 操作；
 4. 确认 `a13c42…/c833…` store 被重新创建、Git index 有效且后续 snapshot 可生成。
 
-## 当前阻塞
+## 当前门禁
 
-基线采集时发现 5 个 `opencode.exe` 进程仍在运行。按照工具自身的安全要求，在这些进程全部关闭前不会执行任何 Safe GC、Reset 或 Purge。
-
+2026-07-17 的真实 UI 验证识别到 6 个活动 snapshot store、0 个不确定 store。takingNotes legacy/current 两行分别显示 `INACTIVE` 与 `ACTIVE — PID 145100`；legacy 清理按钮可用，current store 的 Safe GC、Reset、Purge 按钮均被单独禁用。批量 Preview 包含 15 个 inactive store 并跳过 6 个 active store。执行前还会重新枚举 PID、检查 Git lock 并观察 store 是否仍在写入。

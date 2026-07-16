@@ -42,6 +42,9 @@ class SnapshotController final : public QObject {
   Q_PROPERTY(bool hasPlan READ hasPlan NOTIFY planChanged)
   Q_PROPERTY(int planKeepTrees READ planKeepTrees NOTIFY planChanged)
   Q_PROPERTY(int planRemoveTrees READ planRemoveTrees NOTIFY planChanged)
+  Q_PROPERTY(int planRepositoryCount READ planRepositoryCount NOTIFY planChanged)
+  Q_PROPERTY(int planBlockedCount READ planBlockedCount NOTIFY planChanged)
+  Q_PROPERTY(QString planBlockedSummary READ planBlockedSummary NOTIFY planChanged)
 
  public:
   explicit SnapshotController(QObject* parent = nullptr);
@@ -76,6 +79,9 @@ class SnapshotController final : public QObject {
   bool hasPlan() const;
   int planKeepTrees() const;
   int planRemoveTrees() const;
+  int planRepositoryCount() const;
+  int planBlockedCount() const;
+  QString planBlockedSummary() const;
 
   void setSnapshotRoot(const QString& value);
   void setDatabasePath(const QString& value);

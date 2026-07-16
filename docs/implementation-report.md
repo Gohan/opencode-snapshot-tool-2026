@@ -102,7 +102,7 @@
 - 输入大小写不敏感，并忽略首尾空格。
 - 项目标识仅展示，用于确认当前选择。
 
-执行按钮仍要求同时完成“OpenCode 已关闭”勾选和短确认词输入。
+执行按钮不再要求用户笼统声明“所有 OpenCode 已关闭”。应用会自动验证选中 store 是否 inactive；Reset/Purge 仍要求短确认词输入。
 
 ![RESET 短确认词](images/implementation-reset-confirmation.png)
 
@@ -114,6 +114,10 @@
 - Preview 期间切换项目会使结果失效。
 - 执行前重新读取并验证 live index tree。
 - 检测 Git lock 文件并拒绝清理。
+- 将运行中的 OpenCode PID 精确映射到 project/worktree snapshot store；只阻止匹配 store。
+- 对无法读取工作目录或可服务多个目录的进程标记 `POSSIBLY ACTIVE` 并 fail closed。
+- 批量 Preview 自动排除 active/uncertain stores，执行前再次检测全部目标；任一目标变为 active 会在首个修改前中止整个批次。
+- 执行前对 store 做短写入稳定性观察，检测到变化即拒绝清理。
 - Safe GC 先创建私有保护 refs，再执行 prune/GC。
 - Full Store Purge 对目标路径进行 canonicalize，并拒绝 snapshot 根目录之外的路径。
 - Reset 和 Purge 不进入批量 Clean。
@@ -121,7 +125,7 @@
 
 ## 8. 自动化验证
 
-本轮重新执行 `ctest --test-dir build/dev --output-on-failure`，结果为 13/13 通过。覆盖范围包括：
+本轮重新执行 `ctest --test-dir build/dev --output-on-failure`，结果为 20/20 通过。覆盖范围包括：
 
 - retention policy 与 current index tree 保护；
 - legacy / two-level snapshot store 发现；
@@ -133,8 +137,19 @@
 - Safe GC 只保留计划 tree；
 - History Reset 保留当前状态并允许未来 snapshot；
 - Full Store Purge 的根目录边界，以及 OpenCode 后续重新初始化能力。
+- normal CLI、多个 worktree、legacy/current project ID、server/desktop 不确定进程的活动分类；
+- Preview 后新出现匹配 PID 时，执行前拒绝且不修改 store。
+- store 在执行前短观察窗口内发生写入时，整批在首个修改前拒绝。
 
-## 9. 尚需用户验收
+## 9. 按 store 的 OpenCode 进程门禁
+
+真实运行验证中，应用识别到 21 个 snapshot stores：15 个 inactive、6 个 active、0 个 uncertain。takingNotes 的 legacy store（`6e9349ed…/c833…`）与 current store（`a13c42b9…/c833…`）虽然指向同一 worktree，仍根据数据库当前 project ID 正确区分：legacy 显示 `INACTIVE`，current 显示 `ACTIVE — PID 145100`。
+
+活动 store 的 Safe GC、History Reset、Full Purge 按钮全部单独禁用；其他项目和同项目其他 worktree 可以继续保持 OpenCode 打开。批量 Preview 显示“15 stores / 6 skipped”，不会把被跳过的 store 放进执行计划。
+
+![按 store 的进程感知清理门禁](images/process-aware-cleanup.png)
+
+## 10. 尚需用户验收
 
 代码实现和自动化验证已经完成，但以下事项仍需要用户在真实工作流中确认：
 

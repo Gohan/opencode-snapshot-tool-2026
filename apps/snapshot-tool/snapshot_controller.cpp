@@ -1,6 +1,7 @@
 #include "snapshot_controller.h"
 
 #include "ost/core/retention_policy.h"
+#include "ost/core/opencode_process_detector.h"
 
 #include <QDir>
 #include <QFileDialog>
@@ -18,6 +19,12 @@ QString objectSuffix(const QString& path) {
   const auto suffix = QFileInfo(path).suffix().toLower();
   return suffix.isEmpty() ? QStringLiteral("(no extension)")
                           : QStringLiteral(".") + suffix;
+}
+
+QString pidList(const QVector<qint64>& pids) {
+  QStringList values;
+  for (const auto pid : pids) values.push_back(QString::number(pid));
+  return values.join(QStringLiteral(", "));
 }
 }  // namespace
 
@@ -40,6 +47,17 @@ SnapshotController::SnapshotController(QObject* parent) : QObject(parent), setti
                        .arg(repositoryCount()).arg(snapshotCount());
     if (!scanResult_.warnings.isEmpty())
       message += tr(" — Warning: %1").arg(scanResult_.warnings.join(QStringLiteral(" · ")));
+    const auto active = std::count_if(scanResult_.repositories.cbegin(),
+                                      scanResult_.repositories.cend(), [](const auto& repository) {
+      return repository.activity.state == RepositoryActivityState::Active;
+    });
+    const auto possible = std::count_if(scanResult_.repositories.cbegin(),
+                                        scanResult_.repositories.cend(), [](const auto& repository) {
+      return repository.activity.state == RepositoryActivityState::PossiblyActive;
+    });
+    if (active || possible)
+      message += tr(" — %1 active, %2 uncertain; only matching stores are protected")
+                     .arg(active).arg(possible);
     setStatus(std::move(message));
     emit dataChanged();
     emit planChanged();
@@ -48,8 +66,10 @@ SnapshotController::SnapshotController(QObject* parent) : QObject(parent), setti
   });
   connect(&previewWatcher_, &QFutureWatcher<CleanupPlan>::finished, this, [this] {
     cleanupPlan_ = previewWatcher_.result();
-    setStatus(tr("Preview ready: %1 trees can be released; %2 in directly removable files. Git pack savings are measured after cleanup")
-                  .arg(cleanupPlan_.removeTrees).arg(formatBytes(cleanupPlan_.estimatedReclaimableBytes)));
+    setStatus(tr("Preview ready: %1 inactive stores included, %2 active/uncertain stores skipped; %3 trees can be released")
+                  .arg(cleanupPlan_.repositories.size())
+                  .arg(cleanupPlan_.blockedRepositories.size())
+                  .arg(cleanupPlan_.removeTrees));
     emit planChanged();
     notifyBusy();
   });
@@ -139,6 +159,17 @@ qint64 SnapshotController::estimatedReclaimableBytes() const { return cleanupPla
 bool SnapshotController::hasPlan() const { return !cleanupPlan_.repositories.isEmpty(); }
 int SnapshotController::planKeepTrees() const { return cleanupPlan_.keepTrees; }
 int SnapshotController::planRemoveTrees() const { return cleanupPlan_.removeTrees; }
+int SnapshotController::planRepositoryCount() const { return cleanupPlan_.repositories.size(); }
+int SnapshotController::planBlockedCount() const { return cleanupPlan_.blockedRepositories.size(); }
+QString SnapshotController::planBlockedSummary() const {
+  QStringList rows;
+  for (const auto& repository : cleanupPlan_.blockedRepositories) {
+    const auto pids = pidList(repository.activity.processIds);
+    rows.push_back(pids.isEmpty() ? repository.relativePath
+                                  : QStringLiteral("%1 (PID %2)").arg(repository.relativePath, pids));
+  }
+  return rows.join(QStringLiteral(" · "));
+}
 
 int SnapshotController::snapshotCount() const {
   int total = 0;
@@ -168,7 +199,16 @@ QVariantList SnapshotController::repositories() const {
     rows.push_back(QVariantMap{{"index", index}, {"name", repo.relativePath}, {"worktree", repo.worktree},
                                {"bytes", repo.actualBytes}, {"bytesText", formatBytes(repo.actualBytes)},
                                {"lfsText", formatBytes(repo.lfsBytes)}, {"snapshots", repo.snapshots.size()},
-                               {"kept", kept}, {"dropped", repo.snapshots.size() - kept}});
+                               {"kept", kept}, {"dropped", repo.snapshots.size() - kept},
+                               {"activity", repo.activity.state == RepositoryActivityState::Active
+                                                ? QStringLiteral("active")
+                                                : repo.activity.state == RepositoryActivityState::PossiblyActive
+                                                ? QStringLiteral("possible") : QStringLiteral("inactive")},
+                               {"activityLabel", repo.activity.state == RepositoryActivityState::Active
+                                                ? tr("ACTIVE")
+                                                : repo.activity.state == RepositoryActivityState::PossiblyActive
+                                                ? tr("POSSIBLY ACTIVE") : tr("INACTIVE")},
+                               {"processIds", pidList(repo.activity.processIds)}});
   }
   return rows;
 }
@@ -243,13 +283,31 @@ QVariantMap SnapshotController::selectedRepositoryDetails() const {
     explanation += tr(" %1 other snapshot repository points to the same worktree; together they use %2.")
                        .arg(duplicateWorktrees).arg(formatBytes(combinedWorktreeBytes));
 
+  const auto activityCode = repo.activity.state == RepositoryActivityState::Active
+                                ? QStringLiteral("active")
+                                : repo.activity.state == RepositoryActivityState::PossiblyActive
+                                ? QStringLiteral("possible") : QStringLiteral("inactive");
+  const auto pids = pidList(repo.activity.processIds);
+  const auto activityLabel = repo.activity.state == RepositoryActivityState::Active
+                                 ? tr("ACTIVE — PID %1").arg(pids)
+                                 : repo.activity.state == RepositoryActivityState::PossiblyActive
+                                 ? tr("POSSIBLY ACTIVE — PID %1").arg(pids)
+                                 : tr("INACTIVE");
+  const auto activityMessage = repo.activity.state == RepositoryActivityState::Active
+      ? tr("This exact snapshot store is used by OpenCode PID %1. Close only that matching instance before cleanup; other OpenCode projects can remain open.").arg(pids)
+      : repo.activity.state == RepositoryActivityState::PossiblyActive
+      ? tr("OpenCode PID %1 may access multiple projects or its worktree could not be read. Cleanup is blocked until this process is identified or closed.").arg(pids)
+      : tr("No running OpenCode process maps to this snapshot store. Execution checks the process list, Git locks, and store writes again before changing anything.");
+
   return {{"valid", true}, {"name", repo.relativePath}, {"worktree", repo.worktree},
           {"gitDir", repo.gitDir}, {"totalBytes", repo.actualBytes},
           {"totalBytesText", formatBytes(repo.actualBytes)}, {"categories", categories},
           {"looseObjects", repo.looseObjects}, {"packedObjects", repo.packedObjects},
           {"largestFiles", largestFiles}, {"duplicateWorktrees", duplicateWorktrees},
           {"combinedWorktreeBytesText", formatBytes(combinedWorktreeBytes)},
-          {"explanation", explanation}};
+          {"explanation", explanation}, {"activity", activityCode},
+          {"activityLabel", activityLabel}, {"activityMessage", activityMessage},
+          {"processIds", pids}, {"canClean", repo.activity.state == RepositoryActivityState::Inactive}};
 }
 
 QVariantMap SnapshotController::repositoryAnalysis() const {
@@ -420,12 +478,17 @@ void SnapshotController::scan() {
   const RetentionSettings retention{settings_.cleanup.recentDays, settings_.cleanup.fallbackCount};
   const QPointer<SnapshotController> self(this);
   scanWatcher_.setFuture(QtConcurrent::run([root, database, retention, self] {
-    return SnapshotScanner().scan(root, database, retention, [self](const QString& message) {
+    auto result = SnapshotScanner().scan(root, database, retention, [self](const QString& message) {
       if (!self) return;
       QMetaObject::invokeMethod(self, [self, message] {
         if (self) self->setStatus(message + QStringLiteral("…"));
       }, Qt::QueuedConnection);
     });
+    if (self) QMetaObject::invokeMethod(self, [self] {
+      if (self) self->setStatus(QObject::tr("Mapping running OpenCode instances to snapshot stores…"));
+    }, Qt::QueuedConnection);
+    OpenCodeProcessDetector().detect(result.repositories, database);
+    return result;
   }));
   notifyBusy();
 }
@@ -508,11 +571,13 @@ void SnapshotController::previewProjectCleanup() {
   const auto repository = scanResult_.repositories[selectedRepository_];
   projectPreviewRepositoryIndex_ = selectedRepository_;
   const auto settings = cleanupSettings();
+  const auto database = settings_.databasePath;
   setStatus(tr("Previewing safe cleanup for %1…").arg(repository.relativePath));
   emit projectPlanChanged();
   notifyBusy();
-  projectPreviewWatcher_.setFuture(QtConcurrent::run([repository, settings] {
+  projectPreviewWatcher_.setFuture(QtConcurrent::run([repository, settings, database] {
     ScanResult scan;
+    scan.databasePath = database;
     scan.totalBytes = repository.actualBytes;
     scan.repositories = {repository};
     return SnapshotCleaner().preview(scan, settings);
@@ -526,11 +591,12 @@ void SnapshotController::previewProjectReset() {
   const auto repository = scanResult_.repositories[selectedRepository_];
   projectPreviewRepositoryIndex_ = selectedRepository_;
   const auto settings = cleanupSettings();
+  const auto database = settings_.databasePath;
   setStatus(tr("Previewing snapshot-history reset for %1…").arg(repository.relativePath));
   emit projectPlanChanged();
   notifyBusy();
-  projectPreviewWatcher_.setFuture(QtConcurrent::run([repository, settings] {
-    return SnapshotCleaner().previewReset(repository, settings);
+  projectPreviewWatcher_.setFuture(QtConcurrent::run([repository, settings, database] {
+    return SnapshotCleaner().previewReset(repository, settings, database);
   }));
 }
 
@@ -541,11 +607,12 @@ void SnapshotController::previewProjectPurge() {
   const auto repository = scanResult_.repositories[selectedRepository_];
   projectPreviewRepositoryIndex_ = selectedRepository_;
   const auto root = settings_.snapshotRoot;
+  const auto database = settings_.databasePath;
   setStatus(tr("Validating full snapshot-store purge for %1…").arg(repository.relativePath));
   emit projectPlanChanged();
   notifyBusy();
-  projectPreviewWatcher_.setFuture(QtConcurrent::run([repository, root] {
-    return SnapshotCleaner().previewPurge(repository, root);
+  projectPreviewWatcher_.setFuture(QtConcurrent::run([repository, root, database] {
+    return SnapshotCleaner().previewPurge(repository, root, database);
   }));
 }
 

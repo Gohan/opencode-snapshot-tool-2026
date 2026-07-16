@@ -7,9 +7,15 @@
 #include <QTemporaryDir>
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <thread>
+
 namespace {
 using ost::core::CleanupSettings;
 using ost::core::GitClient;
+using ost::core::RepositoryActivity;
+using ost::core::RepositoryActivityState;
+using ost::core::RepositoryCleanupPlan;
 using ost::core::RepositoryInfo;
 using ost::core::ScanResult;
 using ost::core::SnapshotCleaner;
@@ -202,5 +208,94 @@ TEST(SnapshotCleaner, FullStorePurgeIsRootBoundedAndOpenCodeCanReinitialize) {
   const auto future = writeTree(git, gitDir, "future after purge");
   ASSERT_TRUE(git.run(gitDir, {"read-tree", future}).ok());
   EXPECT_EQ(QString::fromLatin1(git.run(gitDir, {"write-tree"}).output.trimmed()), future);
+}
+
+TEST(SnapshotCleaner, RefusesExecutionWhenTheTargetStoreBecomesActiveAfterPreview) {
+  GitClient git;
+  if (!git.available()) GTEST_SKIP() << "git is required";
+  QTemporaryDir temp;
+  ASSERT_TRUE(temp.isValid());
+
+  const auto gitDir = QDir(temp.path()).filePath("snapshot/project/store");
+  ASSERT_TRUE(QDir().mkpath(QFileInfo(gitDir).path()));
+  ASSERT_TRUE(git.run(gitDir, {"init", "--bare"}).ok());
+  const auto tree = writeTree(git, gitDir, "must survive blocked cleanup");
+
+  RepositoryInfo repository;
+  repository.gitDir = gitDir;
+  repository.relativePath = "project/store";
+  repository.projectId = "project";
+  repository.worktree = QDir(temp.path()).filePath("worktree");
+  repository.actualBytes = ost::core::SnapshotScanner::directorySize(gitDir);
+  SnapshotInfo snapshot;
+  snapshot.hash = tree;
+  snapshot.keep = false;
+  snapshot.exists = true;
+  repository.snapshots = {snapshot};
+  ScanResult scan;
+  scan.databasePath = QDir(temp.path()).filePath("opencode.db");
+  scan.totalBytes = repository.actualBytes;
+  scan.repositories = {repository};
+
+  SnapshotCleaner previewer(git);
+  const auto plan = previewer.preview(scan, CleanupSettings{});
+  ASSERT_EQ(plan.repositories.size(), 1);
+
+  SnapshotCleaner executor(git, [](const RepositoryCleanupPlan&, const QString&) {
+    RepositoryActivity activity;
+    activity.state = RepositoryActivityState::Active;
+    activity.processIds = {321};
+    return activity;
+  });
+  const auto result = executor.execute(plan, CleanupSettings{});
+
+  EXPECT_FALSE(result.success);
+  EXPECT_TRUE(result.error.contains(QStringLiteral("321")));
+  EXPECT_TRUE(result.error.contains(QStringLiteral("OpenCode"), Qt::CaseInsensitive));
+  EXPECT_TRUE(git.run(gitDir, {"cat-file", "-e", tree}).ok());
+}
+
+TEST(SnapshotCleaner, RefusesExecutionWhenTheStoreChangesDuringPreflightObservation) {
+  GitClient git;
+  if (!git.available()) GTEST_SKIP() << "git is required";
+  QTemporaryDir temp;
+  ASSERT_TRUE(temp.isValid());
+
+  const auto gitDir = QDir(temp.path()).filePath("snapshot/project/store");
+  ASSERT_TRUE(QDir().mkpath(QFileInfo(gitDir).path()));
+  ASSERT_TRUE(git.run(gitDir, {"init", "--bare"}).ok());
+  const auto tree = writeTree(git, gitDir, "stable until execution");
+  RepositoryInfo repository;
+  repository.gitDir = gitDir;
+  repository.relativePath = "project/store";
+  repository.projectId = "project";
+  repository.worktree = QDir(temp.path()).filePath("worktree");
+  repository.actualBytes = ost::core::SnapshotScanner::directorySize(gitDir);
+  SnapshotInfo snapshot;
+  snapshot.hash = tree;
+  snapshot.keep = true;
+  snapshot.exists = true;
+  repository.snapshots = {snapshot};
+  ScanResult scan;
+  scan.totalBytes = repository.actualBytes;
+  scan.repositories = {repository};
+  const auto plan = SnapshotCleaner(git).preview(scan, CleanupSettings{});
+
+  std::thread writer([gitDir] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    QFile marker(QDir(gitDir).filePath(QStringLiteral("activity-marker")));
+    if (marker.open(QIODevice::WriteOnly)) marker.write("changed");
+  });
+  SnapshotCleaner executor(git, [](const RepositoryCleanupPlan&, const QString&) {
+    return RepositoryActivity{};
+  });
+  const auto result = executor.execute(plan, CleanupSettings{});
+  writer.join();
+
+  EXPECT_FALSE(result.success);
+  EXPECT_TRUE(result.error.contains(QStringLiteral("changed"), Qt::CaseInsensitive));
+  EXPECT_TRUE(git.run(gitDir, {"cat-file", "-e", tree}).ok());
+  EXPECT_TRUE(git.run(gitDir, {"for-each-ref", "refs/opencode-snapshot-tool"})
+                  .output.trimmed().isEmpty());
 }
 }  // namespace
