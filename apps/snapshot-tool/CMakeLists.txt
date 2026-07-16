@@ -6,6 +6,9 @@ qt_add_executable(opencode-snapshot-tool
 
 if(WIN32)
   target_sources(opencode-snapshot-tool PRIVATE app-icon.rc)
+  set_property(SOURCE app-icon.rc APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/app-icon.ico"
+  )
 endif()
 
 qt_add_qml_module(opencode-snapshot-tool
