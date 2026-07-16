@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.24)
 project(opencode-snapshot-tool-2026 VERSION 0.1.2 LANGUAGES CXX)
 
+if(WIN32)
+  enable_language(RC)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

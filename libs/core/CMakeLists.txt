@@ -2,7 +2,9 @@ add_library(ost_core STATIC
   src/retention_policy.cpp
   src/git_client.cpp
   src/snapshot_scanner.cpp
+  src/snapshot_analyzer.cpp
   src/snapshot_cleaner.cpp
+  src/opencode_process_detector.cpp
   src/app_settings.cpp
 )
 add_library(ost::core ALIAS ost_core)

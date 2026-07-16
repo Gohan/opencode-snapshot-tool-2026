@@ -1,5 +1,6 @@
 #include "ost/core/snapshot_scanner.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
@@ -40,6 +41,38 @@ TEST(SnapshotScanner, DirectorySizeIncludesLfsAndTemporaryPackFiles) {
   touch(QDir(temp.path()).filePath("objects/pack/tmp_pack_x"), QByteArray(23, 'c'));
 
   EXPECT_EQ(ost::core::SnapshotScanner::directorySize(temp.path()), 51);
+}
+
+TEST(SnapshotScanner, ReportsExactRepositoryStorageCategories) {
+  int argc = 1;
+  char executable[] = "ost-tests";
+  char* argv[] = {executable, nullptr};
+  QCoreApplication application(argc, argv);
+  QTemporaryDir temp;
+  ASSERT_TRUE(temp.isValid());
+  const auto gitDir = QDir(temp.path()).filePath("project");
+  makeGitDir(gitDir);
+  touch(QDir(gitDir).filePath("objects/pack/a.pack"), QByteArray(11, 'a'));
+  touch(QDir(gitDir).filePath("lfs/objects/aa/bb/oid"), QByteArray(17, 'b'));
+  touch(QDir(gitDir).filePath("objects/pack/tmp_pack_x"), QByteArray(29, 'c'));
+  touch(QDir(gitDir).filePath("config"), QByteArray(7, 'd'));
+
+  const auto result = ost::core::SnapshotScanner().scan(
+      temp.path(), QDir(temp.path()).filePath("missing-opencode.db"), {});
+
+  ASSERT_EQ(result.repositories.size(), 1);
+  const auto& repository = result.repositories.front();
+  EXPECT_EQ(repository.actualBytes, ost::core::SnapshotScanner::directorySize(gitDir));
+  EXPECT_EQ(repository.gitObjectBytes, 11);
+  EXPECT_EQ(repository.lfsBytes, 17);
+  EXPECT_EQ(repository.tempPackBytes, 29);
+  EXPECT_EQ(repository.actualBytes - repository.gitObjectBytes - repository.lfsBytes -
+                repository.tempPackBytes,
+            QFileInfo(QDir(gitDir).filePath("HEAD")).size() + 7);
+  ASSERT_FALSE(repository.largestFiles.isEmpty());
+  EXPECT_EQ(repository.largestFiles.front().relativePath,
+            QDir::fromNativeSeparators("objects/pack/tmp_pack_x"));
+  EXPECT_EQ(repository.largestFiles.front().bytes, 29);
 }
 
 TEST(SnapshotScanner, MissingSnapshotRootProducesActionableWarning) {

@@ -1,12 +1,15 @@
 #include "ost/core/snapshot_cleaner.h"
 
+#include "ost/core/opencode_process_detector.h"
 #include "ost/core/snapshot_scanner.h"
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QSet>
+#include <QThread>
 
 #include <algorithm>
 
@@ -49,20 +52,97 @@ qint64 staleBytes(const QString& gitDir, int staleHours) {
   }
   return total;
 }
+
+QStringList activeGitLocks(const QString& gitDir) {
+  QStringList result;
+  QDirIterator iterator(gitDir, QDir::Files | QDir::Hidden | QDir::System,
+                        QDirIterator::Subdirectories);
+  while (iterator.hasNext()) {
+    iterator.next();
+    const auto name = iterator.fileName();
+    if (name.endsWith(QStringLiteral(".lock")) || name == QStringLiteral("gc.pid"))
+      result.push_back(QDir(gitDir).relativeFilePath(iterator.filePath()));
+  }
+  return result;
+}
+
+QString purgePathError(const QString& snapshotRoot, const QString& gitDir) {
+  const auto root = QDir::fromNativeSeparators(QFileInfo(snapshotRoot).canonicalFilePath());
+  const auto target = QDir::fromNativeSeparators(QFileInfo(gitDir).canonicalFilePath());
+  if (root.isEmpty() || target.isEmpty())
+    return QStringLiteral("Snapshot root or repository path does not exist");
+  const auto rootPrefix = root.endsWith(QChar('/')) ? root : root + QChar('/');
+#ifdef Q_OS_WIN
+  const auto sensitivity = Qt::CaseInsensitive;
+#else
+  const auto sensitivity = Qt::CaseSensitive;
+#endif
+  if (target.compare(root, sensitivity) == 0 || !target.startsWith(rootPrefix, sensitivity))
+    return QStringLiteral("Repository is not a child of the configured snapshot root");
+  return {};
+}
+
+QString processList(const QVector<qint64>& pids) {
+  QStringList values;
+  for (const auto pid : pids) values.push_back(QString::number(pid));
+  return values.join(QStringLiteral(", "));
+}
+
+QString activityError(const ost::core::RepositoryCleanupPlan& repository,
+                      const ost::core::RepositoryActivity& activity) {
+  if (activity.state == ost::core::RepositoryActivityState::Inactive) return {};
+  const auto pids = processList(activity.processIds);
+  if (activity.state == ost::core::RepositoryActivityState::Active)
+    return QStringLiteral("OpenCode PID(s) %1 currently use %2. Close only those matching instances and scan again")
+        .arg(pids.isEmpty() ? QStringLiteral("unknown") : pids, repository.relativePath);
+  return QStringLiteral("OpenCode PID(s) %1 may use %2, but their exact worktree could not be proven. Close or identify only those processes and scan again")
+      .arg(pids.isEmpty() ? QStringLiteral("unknown") : pids, repository.relativePath);
+}
+
+QByteArray activityFingerprint(const QString& gitDir) {
+  QVector<QByteArray> rows;
+  QDirIterator iterator(gitDir, QDir::Files | QDir::Hidden | QDir::System,
+                        QDirIterator::Subdirectories);
+  while (iterator.hasNext()) {
+    iterator.next();
+    const auto info = iterator.fileInfo();
+    rows.push_back(QDir(gitDir).relativeFilePath(info.absoluteFilePath()).toUtf8() + '\0' +
+                   QByteArray::number(info.size()) + '\0' +
+                   QByteArray::number(info.lastModified().toMSecsSinceEpoch()));
+  }
+  std::sort(rows.begin(), rows.end());
+  QCryptographicHash hash(QCryptographicHash::Sha256);
+  for (const auto& row : rows) hash.addData(row);
+  return hash.result();
+}
+
+ost::core::RepositoryCleanupPlan cleanupItem(const ost::core::RepositoryInfo& repository) {
+  ost::core::RepositoryCleanupPlan item;
+  item.gitDir = repository.gitDir;
+  item.relativePath = repository.relativePath;
+  item.projectId = repository.projectId;
+  item.worktree = repository.worktree;
+  item.activity = repository.activity;
+  item.currentBytes = repository.actualBytes;
+  return item;
+}
 }  // namespace
 
 namespace ost::core {
-SnapshotCleaner::SnapshotCleaner(GitClient git) : git_(std::move(git)) {}
+SnapshotCleaner::SnapshotCleaner(GitClient git, ActivityProbe activityProbe)
+    : git_(std::move(git)), activityProbe_(std::move(activityProbe)) {}
 
 CleanupPlan SnapshotCleaner::preview(const ScanResult& scan, const CleanupSettings& settings) const {
   CleanupPlan plan;
   plan.currentBytes = scan.totalBytes;
+  plan.databasePath = scan.databasePath;
   for (const auto& repository : scan.repositories) {
     if (repository.snapshots.isEmpty()) continue;
-    RepositoryCleanupPlan item;
-    item.gitDir = repository.gitDir;
-    item.relativePath = repository.relativePath;
-    item.currentBytes = repository.actualBytes;
+    auto item = cleanupItem(repository);
+    if (repository.activity.state != RepositoryActivityState::Inactive) {
+      plan.blockedRepositories.push_back(std::move(item));
+      continue;
+    }
     QSet<QString> keep;
     QSet<QString> remove;
     for (const auto& snapshot : repository.snapshots) {
@@ -88,8 +168,139 @@ CleanupPlan SnapshotCleaner::preview(const ScanResult& scan, const CleanupSettin
   return plan;
 }
 
+CleanupPlan SnapshotCleaner::previewReset(const RepositoryInfo& repository,
+                                          const CleanupSettings& settings,
+                                          const QString& databasePath) const {
+  CleanupPlan failed;
+  failed.resetHistory = true;
+  failed.databasePath = databasePath;
+  if (repository.activity.state != RepositoryActivityState::Inactive) {
+    const auto item = cleanupItem(repository);
+    failed.blockedRepositories = {item};
+    failed.error = activityError(item, repository.activity);
+    return failed;
+  }
+  const auto current = git_.run(repository.gitDir, {QStringLiteral("write-tree")});
+  const auto currentHash = QString::fromLatin1(current.output.trimmed());
+  if (!current.ok() || currentHash.size() != 40) {
+    failed.error = QStringLiteral("Could not protect the current index tree in %1: %2")
+                       .arg(repository.relativePath, QString::fromUtf8(current.error).trimmed());
+    return failed;
+  }
+
+  auto resetRepository = repository;
+  bool currentPresent = false;
+  for (auto& snapshot : resetRepository.snapshots) {
+    snapshot.keep = snapshot.hash == currentHash;
+    currentPresent = currentPresent || snapshot.hash == currentHash;
+  }
+  if (!currentPresent) {
+    SnapshotInfo currentSnapshot;
+    currentSnapshot.hash = currentHash;
+    currentSnapshot.exists = true;
+    currentSnapshot.keep = true;
+    currentSnapshot.source = SnapshotSource::CurrentIndex;
+    resetRepository.snapshots.push_back(currentSnapshot);
+  }
+  ScanResult scan;
+  scan.databasePath = databasePath;
+  scan.totalBytes = repository.actualBytes;
+  scan.repositories = {resetRepository};
+  auto plan = preview(scan, settings);
+  plan.resetHistory = true;
+  return plan;
+}
+
+CleanupPlan SnapshotCleaner::previewPurge(const RepositoryInfo& repository,
+                                          const QString& snapshotRoot,
+                                          const QString& databasePath) const {
+  CleanupPlan plan;
+  plan.purgeStore = true;
+  plan.databasePath = databasePath;
+  if (repository.activity.state != RepositoryActivityState::Inactive) {
+    const auto item = cleanupItem(repository);
+    plan.blockedRepositories = {item};
+    plan.error = activityError(item, repository.activity);
+    return plan;
+  }
+  if (const auto pathError = purgePathError(snapshotRoot, repository.gitDir);
+      !pathError.isEmpty()) {
+    plan.error = QStringLiteral("Refusing full-store purge for %1: %2")
+                     .arg(repository.relativePath, pathError);
+    return plan;
+  }
+  const auto current = git_.run(repository.gitDir, {QStringLiteral("write-tree")});
+  if (!current.ok() || current.output.trimmed().size() != 40) {
+    plan.error = QStringLiteral("Could not validate the live snapshot store in %1: %2")
+                     .arg(repository.relativePath, QString::fromUtf8(current.error).trimmed());
+    return plan;
+  }
+  auto item = cleanupItem(repository);
+  item.allowedRoot = snapshotRoot;
+  item.currentBytes = SnapshotScanner::directorySize(repository.gitDir);
+  for (const auto& snapshot : repository.snapshots)
+    if (!item.removeHashes.contains(snapshot.hash)) item.removeHashes.push_back(snapshot.hash);
+  plan.currentBytes = item.currentBytes;
+  plan.estimatedReclaimableBytes = item.currentBytes;
+  plan.removeTrees = item.removeHashes.size();
+  plan.repositories = {item};
+  return plan;
+}
+
 CleanupResult SnapshotCleaner::execute(const CleanupPlan& plan, const CleanupSettings& settings) const {
   CleanupResult result;
+  if (!plan.error.isEmpty()) {
+    result.error = plan.error;
+    return result;
+  }
+  if (plan.repositories.isEmpty()) {
+    result.error = QStringLiteral("The cleanup plan contains no inactive snapshot stores");
+    return result;
+  }
+
+  // Complete all activity/lock/write-stability checks before mutating the first
+  // repository, so a batch never becomes partially cleaned by a late guard.
+  QVector<RepositoryActivity> activities;
+  activities.reserve(plan.repositories.size());
+  if (activityProbe_) {
+    for (const auto& repository : plan.repositories)
+      activities.push_back(activityProbe_(repository, plan.databasePath));
+  } else {
+    QVector<RepositoryInfo> repositories;
+    repositories.reserve(plan.repositories.size());
+    for (const auto& item : plan.repositories) {
+      RepositoryInfo repository;
+      repository.gitDir = item.gitDir;
+      repository.relativePath = item.relativePath;
+      repository.projectId = item.projectId;
+      repository.worktree = item.worktree;
+      repositories.push_back(std::move(repository));
+    }
+    OpenCodeProcessDetector().detect(repositories, plan.databasePath);
+    for (const auto& repository : repositories) activities.push_back(repository.activity);
+  }
+
+  for (int index = 0; index < plan.repositories.size(); ++index) {
+    const auto& repository = plan.repositories[index];
+    const auto& activity = activities[index];
+    if (const auto error = activityError(repository, activity); !error.isEmpty()) {
+      result.error = QStringLiteral("Refusing cleanup: %1").arg(error);
+      return result;
+    }
+    const auto locks = activeGitLocks(repository.gitDir);
+    if (!locks.isEmpty()) {
+      result.error = QStringLiteral("Refusing cleanup because Git lock files exist in %1: %2")
+                         .arg(repository.relativePath, locks.join(QStringLiteral(", ")));
+      return result;
+    }
+    const auto before = activityFingerprint(repository.gitDir);
+    QThread::msleep(150);
+    if (before != activityFingerprint(repository.gitDir)) {
+      result.error = QStringLiteral("Refusing cleanup because %1 changed during the activity check")
+                         .arg(repository.relativePath);
+      return result;
+    }
+  }
   qint64 plannedBytesAtPreview = 0;
   for (const auto& repository : plan.repositories) plannedBytesAtPreview += repository.currentBytes;
   const auto untouchedBytes = std::max<qint64>(0, plan.currentBytes - plannedBytesAtPreview);
@@ -97,6 +308,29 @@ CleanupResult SnapshotCleaner::execute(const CleanupPlan& plan, const CleanupSet
   for (const auto& repository : plan.repositories)
     result.bytesBefore += SnapshotScanner::directorySize(repository.gitDir);
   for (const auto& repository : plan.repositories) {
+    if (plan.purgeStore) {
+      if (const auto pathError = purgePathError(repository.allowedRoot, repository.gitDir);
+          !pathError.isEmpty()) {
+        result.error = QStringLiteral("Refusing full-store purge for %1: %2")
+                           .arg(repository.relativePath, pathError);
+        return result;
+      }
+      const auto currentTree = git_.run(repository.gitDir, {QStringLiteral("write-tree")});
+      if (!currentTree.ok() || currentTree.output.trimmed().size() != 40) {
+        result.error = QStringLiteral("Refusing full-store purge because the live index cannot be validated in %1: %2")
+                           .arg(repository.relativePath,
+                                QString::fromUtf8(currentTree.error).trimmed());
+        return result;
+      }
+      if (!QDir(repository.gitDir).removeRecursively()) {
+        result.error = QStringLiteral("Failed to remove the snapshot store for %1")
+                           .arg(repository.relativePath);
+        return result;
+      }
+      result.messages.push_back(QStringLiteral("Removed snapshot store for %1; OpenCode will recreate it on the next snapshot")
+                                    .arg(repository.relativePath));
+      continue;
+    }
     auto keepHashes = repository.keepHashes;
     const auto currentTree = git_.run(repository.gitDir, {QStringLiteral("write-tree")});
     const auto currentHash = QString::fromLatin1(currentTree.output.trimmed());

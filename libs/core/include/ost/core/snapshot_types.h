@@ -8,6 +8,12 @@
 namespace ost::core {
 
 enum class SnapshotSource { Database, GitInferred, CurrentIndex };
+enum class RepositoryActivityState { Inactive, Active, PossiblyActive };
+
+struct RepositoryActivity {
+  RepositoryActivityState state = RepositoryActivityState::Inactive;
+  QVector<qint64> processIds;
+};
 
 struct SnapshotInfo {
   QString hash;
@@ -24,6 +30,11 @@ struct SnapshotInfo {
   QString keepReason;
 };
 
+struct RepositoryFileInfo {
+  QString relativePath;
+  qint64 bytes = 0;
+};
+
 struct RepositoryInfo {
   QString gitDir;
   QString relativePath;
@@ -35,6 +46,8 @@ struct RepositoryInfo {
   qint64 tempPackBytes = 0;
   int looseObjects = 0;
   int packedObjects = 0;
+  RepositoryActivity activity;
+  QVector<RepositoryFileInfo> largestFiles;
   QVector<SnapshotInfo> snapshots;
 };
 
@@ -61,6 +74,10 @@ struct CleanupSettings : RetentionSettings {
 struct RepositoryCleanupPlan {
   QString gitDir;
   QString relativePath;
+  QString projectId;
+  QString worktree;
+  RepositoryActivity activity;
+  QString allowedRoot;
   QVector<QString> keepHashes;
   QVector<QString> removeHashes;
   qint64 currentBytes = 0;
@@ -70,10 +87,15 @@ struct RepositoryCleanupPlan {
 
 struct CleanupPlan {
   QVector<RepositoryCleanupPlan> repositories;
+  QVector<RepositoryCleanupPlan> blockedRepositories;
+  QString databasePath;
   qint64 currentBytes = 0;
   qint64 estimatedReclaimableBytes = 0;
   int keepTrees = 0;
   int removeTrees = 0;
+  bool resetHistory = false;
+  bool purgeStore = false;
+  QString error;
 };
 
 struct CleanupResult {

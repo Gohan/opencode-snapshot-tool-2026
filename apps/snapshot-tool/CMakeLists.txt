@@ -4,6 +4,13 @@ qt_add_executable(opencode-snapshot-tool
   snapshot_controller.h
 )
 
+if(WIN32)
+  target_sources(opencode-snapshot-tool PRIVATE app-icon.rc)
+  set_property(SOURCE app-icon.rc APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/app-icon.ico"
+  )
+endif()
+
 qt_add_qml_module(opencode-snapshot-tool
   URI OpenCodeSnapshotTool
   VERSION 1.0
@@ -13,6 +20,7 @@ qt_add_qml_module(opencode-snapshot-tool
     assets/fonts/OFL-Inter.txt
     assets/fonts/OFL-SpaceGrotesk.txt
     assets/fonts/SpaceGrotesk-Variable.ttf
+    assets/icon/app-icon.png
 )
 
 target_link_libraries(opencode-snapshot-tool PRIVATE
