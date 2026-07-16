@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QFontDatabase>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -12,6 +13,8 @@ int main(int argc, char* argv[]) {
   QCoreApplication::setOrganizationName(QStringLiteral("OpenCodeTools"));
   QCoreApplication::setApplicationName(QStringLiteral("OpenCode Snapshot Tool"));
   QGuiApplication::setApplicationDisplayName(QStringLiteral("OpenCode Snapshot Tool"));
+  app.setWindowIcon(QIcon(
+      QStringLiteral(":/qt/qml/OpenCodeSnapshotTool/assets/icon/app-icon.png")));
 
   QFontDatabase::addApplicationFont(
       QStringLiteral(":/qt/qml/OpenCodeSnapshotTool/assets/fonts/Inter-Variable.ttf"));

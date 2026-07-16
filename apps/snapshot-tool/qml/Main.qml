@@ -395,11 +395,19 @@ ApplicationWindow {
                 }
                 RowLayout {
                     anchors.left: parent.left
-                    anchors.leftMargin: 12
+                    anchors.leftMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: 9
-                    Rectangle { implicitWidth: 14; implicitHeight: 14; color: window.yellow; border.color: window.ink; border.width: 2 }
-                    Rectangle { implicitWidth: 14; implicitHeight: 14; color: window.blue; border.color: window.ink; border.width: 2 }
+                    spacing: 7
+                    Image {
+                        Layout.preferredWidth: 28
+                        Layout.preferredHeight: 28
+                        source: "qrc:/qt/qml/OpenCodeSnapshotTool/assets/icon/app-icon.png"
+                        sourceSize.width: 64
+                        sourceSize.height: 64
+                        fillMode: Image.PreserveAspectFit
+                        smooth: false
+                        mipmap: false
+                    }
                     Label { text: qsTr("OPENCODE SNAPSHOT TOOL"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold; font.letterSpacing: 1 }
                 }
                 Row {
