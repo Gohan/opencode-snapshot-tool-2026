@@ -38,6 +38,18 @@ ApplicationWindow {
         enabled: !snapshotController.busy && snapshotController.repositoryCount > 0
         onActivated: snapshotController.previewCleanup()
     }
+    Shortcut { sequence: "Ctrl+1"; onActivated: repositoryTabs.currentIndex = 0 }
+    Shortcut { sequence: "Ctrl+2"; onActivated: repositoryTabs.currentIndex = 1 }
+    Shortcut { sequence: "Ctrl+3"; onActivated: repositoryTabs.currentIndex = 2 }
+    Shortcut { sequence: "Ctrl+4"; onActivated: repositoryTabs.currentIndex = 3 }
+    Shortcut { sequence: "Ctrl+5"; onActivated: repositoryTabs.currentIndex = 4 }
+    Shortcut { sequence: "Ctrl+D"; enabled: !snapshotController.busy && snapshotController.selectedRepository >= 0; onActivated: snapshotController.analyzeSelectedRepository() }
+    Shortcut {
+        sequence: "Ctrl+Shift+R"
+        enabled: !snapshotController.busy && snapshotController.selectedRepository >= 0 && repositoryDetailPanel.analysis.ready
+        onActivated: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "reset"
+                     ? projectConfirmDialog.open() : snapshotController.previewProjectReset()
+    }
 
     component BrutalButton: Button {
         id: control
@@ -176,6 +188,27 @@ ApplicationWindow {
                     elide: Text.ElideRight
                 }
             }
+        }
+    }
+
+    component BrutalTabButton: TabButton {
+        id: tabControl
+        implicitHeight: 34
+        hoverEnabled: true
+        background: Rectangle {
+            color: tabControl.checked ? window.yellow : tabControl.hovered ? window.blue : window.ink
+            border.color: window.ink
+            border.width: 2
+        }
+        contentItem: Text {
+            text: tabControl.text.toUpperCase()
+            color: tabControl.checked ? window.ink : window.white
+            font.family: "Space Grotesk"
+            font.pixelSize: 10
+            font.weight: Font.Bold
+            font.letterSpacing: 0.7
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
         }
     }
 
@@ -523,6 +556,7 @@ ApplicationWindow {
             BrutalPanel {
                 id: repositoryDetailPanel
                 property var details: snapshotController.selectedRepositoryDetails
+                property var analysis: snapshotController.repositoryAnalysis
                 SplitView.fillWidth: true
                 SplitView.minimumWidth: 610
                 ColumnLayout {
@@ -541,137 +575,296 @@ ApplicationWindow {
                             Label { text: repositoryDetailPanel.details.valid ? repositoryDetailPanel.details.totalBytesText : "—"; color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 20; font.weight: Font.Bold }
                         }
                     }
-                    Rectangle {
+                    TabBar {
+                        id: repositoryTabs
                         Layout.fillWidth: true
-                        implicitHeight: 242
-                        visible: repositoryDetailPanel.details.valid
-                        color: window.paper
-                        border.color: window.ink
-                        border.width: 0
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 15
-                            anchors.rightMargin: 15
-                            anchors.topMargin: 11
-                            anchors.bottomMargin: 10
-                            spacing: 8
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 14
-                                ColumnLayout {
+                        implicitHeight: 36
+                        spacing: 0
+                        background: Rectangle { color: window.ink }
+                        BrutalTabButton { text: qsTr("Overview"); onClicked: repositoryTabs.currentIndex = 0 }
+                        BrutalTabButton { text: qsTr("Paths"); onClicked: repositoryTabs.currentIndex = 1 }
+                        BrutalTabButton { text: qsTr("Objects"); onClicked: repositoryTabs.currentIndex = 2 }
+                        BrutalTabButton { text: qsTr("Snapshots"); onClicked: repositoryTabs.currentIndex = 3 }
+                        BrutalTabButton { text: qsTr("Reclaim"); onClicked: repositoryTabs.currentIndex = 4 }
+                    }
+                    StackLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        currentIndex: repositoryTabs.currentIndex
+                        Rectangle {
+                            color: window.paper
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 15
+                                anchors.rightMargin: 15
+                                anchors.topMargin: 11
+                                anchors.bottomMargin: 10
+                                spacing: 8
+                                RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: 1
-                                    Label { Layout.fillWidth: true; text: repositoryDetailPanel.details.name || ""; color: window.ink; elide: Text.ElideMiddle; font.family: "Space Grotesk"; font.pixelSize: 14; font.weight: Font.Bold }
-                                    Label { Layout.fillWidth: true; text: repositoryDetailPanel.details.worktree || qsTr("Worktree unknown"); color: window.muted; elide: Text.ElideMiddle; font.pixelSize: 10 }
-                                }
-                                Label { text: qsTr("%1 LOOSE  /  %2 PACKED").arg(repositoryDetailPanel.details.looseObjects || 0).arg(repositoryDetailPanel.details.packedObjects || 0); color: window.ink; font.pixelSize: 9; font.weight: Font.Bold }
-                            }
-                            Row {
-                                id: storageBar
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 18
-                                spacing: 0
-                                Repeater {
-                                    model: repositoryDetailPanel.details.categories || []
-                                    delegate: Rectangle {
-                                        required property var modelData
-                                        width: storageBar.width * modelData.percent / 100
-                                        height: storageBar.height
-                                        color: modelData.color
-                                        border.color: window.ink
-                                        border.width: modelData.bytes > 0 ? 1 : 0
+                                    spacing: 14
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 1
+                                        Label { Layout.fillWidth: true; text: repositoryDetailPanel.details.name || ""; color: window.ink; elide: Text.ElideMiddle; font.family: "Space Grotesk"; font.pixelSize: 14; font.weight: Font.Bold }
+                                        Label { Layout.fillWidth: true; text: repositoryDetailPanel.details.worktree || qsTr("Worktree unknown"); color: window.muted; elide: Text.ElideMiddle; font.pixelSize: 10 }
+                                    }
+                                    ColumnLayout {
+                                        spacing: 2
+                                        Label { Layout.alignment: Qt.AlignRight; text: qsTr("%1 LOOSE  /  %2 PACKED").arg(repositoryDetailPanel.details.looseObjects || 0).arg(repositoryDetailPanel.details.packedObjects || 0); color: window.ink; font.pixelSize: 9; font.weight: Font.Bold }
+                                        BrutalButton { implicitWidth: 132; implicitHeight: 31; text: snapshotController.analysisBusy ? qsTr("Analyzing…") : repositoryDetailPanel.analysis.ready ? qsTr("Refresh analysis") : qsTr("Deep analyze"); fillColor: window.blue; foregroundColor: window.white; hoverForegroundColor: window.blue; enabled: !snapshotController.busy; onClicked: snapshotController.analyzeSelectedRepository() }
                                     }
                                 }
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 7
-                                Repeater {
-                                    model: repositoryDetailPanel.details.categories || []
-                                    delegate: Rectangle {
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        implicitHeight: 55
-                                        color: window.paper
-                                        border.color: window.ink
-                                        border.width: 2
-                                        Rectangle { width: 7; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.color }
-                                        Column {
-                                            anchors.fill: parent
-                                            anchors.leftMargin: 14
-                                            anchors.rightMargin: 6
-                                            anchors.topMargin: 6
-                                            spacing: 1
-                                            Label { width: parent.width; text: modelData.label.toUpperCase(); color: window.ink; elide: Text.ElideRight; font.pixelSize: 8; font.weight: Font.Bold }
-                                            Label { width: parent.width; text: modelData.bytesText + "  ·  " + Math.round(modelData.percent) + "%"; color: window.ink; elide: Text.ElideRight; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold }
+                                Row {
+                                    id: storageBar
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 18
+                                    Repeater {
+                                        model: repositoryDetailPanel.details.categories || []
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            width: storageBar.width * modelData.percent / 100
+                                            height: storageBar.height
+                                            color: modelData.color
+                                            border.color: window.ink
+                                            border.width: modelData.bytes > 0 ? 1 : 0
                                         }
                                     }
                                 }
-                            }
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: 70
-                                color: repositoryDetailPanel.details.duplicateWorktrees > 0 ? window.yellow : "#e8e1d6"
-                                border.color: window.ink
-                                border.width: 2
-                                Rectangle { width: 7; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: window.blue }
-                                Label { anchors.fill: parent; anchors.leftMargin: 16; anchors.rightMargin: 9; anchors.topMargin: 6; anchors.bottomMargin: 6; text: repositoryDetailPanel.details.explanation || ""; color: window.ink; wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight; font.pixelSize: 9; font.weight: Font.Medium; verticalAlignment: Text.AlignVCenter }
-                            }
-                        }
-                    }
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: 36
-                        color: window.ink
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 13
-                            anchors.rightMargin: 13
-                            Label { text: qsTr("SNAPSHOT RECORDS"); color: window.white; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold; Layout.fillWidth: true }
-                            Rectangle { implicitWidth: 11; implicitHeight: 11; color: window.yellow; border.color: window.white; border.width: 1 }
-                            Label { text: qsTr("RETAINED"); color: window.white; font.pixelSize: 8; font.weight: Font.Bold }
-                            Rectangle { implicitWidth: 11; implicitHeight: 11; color: window.red; border.color: window.white; border.width: 1 }
-                            Label { text: qsTr("RELEASED"); color: window.white; font.pixelSize: 8; font.weight: Font.Bold }
-                        }
-                    }
-                    ListView {
-                        id: snapshotList
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.margins: 12
-                        clip: true
-                        spacing: 7
-                        model: snapshotController.snapshots
-                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-                        delegate: Rectangle {
-                            required property var modelData
-                            width: snapshotList.width - (snapshotList.ScrollBar.vertical.visible ? 10 : 0)
-                            height: 88
-                            color: window.paper
-                            border.color: window.ink
-                            border.width: 2
-                            Rectangle { width: 10; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.keep ? window.yellow : window.red }
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 23
-                                anchors.rightMargin: 12
-                                anchors.topMargin: 9
-                                anchors.bottomMargin: 9
-                                spacing: 14
-                                ColumnLayout {
+                                RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: 3
-                                    Label { Layout.fillWidth: true; text: modelData.title; color: window.ink; elide: Text.ElideRight; font.family: "Space Grotesk"; font.pixelSize: 14; font.weight: Font.Bold }
-                                    Label { text: modelData.shortHash + "  /  " + modelData.time + "  /  " + modelData.source.toUpperCase(); color: window.muted; font.family: "monospace"; font.pixelSize: 10 }
-                                    Label { text: modelData.keep ? modelData.reason.toUpperCase() : qsTr("OUTSIDE RETENTION POLICY"); color: modelData.keep ? window.ink : window.red; font.pixelSize: 10; font.weight: Font.Bold }
+                                    spacing: 7
+                                    Repeater {
+                                        model: repositoryDetailPanel.details.categories || []
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            Layout.fillWidth: true
+                                            implicitHeight: 55
+                                            color: window.paper
+                                            border.color: window.ink
+                                            border.width: 2
+                                            Rectangle { width: 7; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.color }
+                                            Column {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 14
+                                                anchors.rightMargin: 6
+                                                anchors.topMargin: 6
+                                                spacing: 1
+                                                Label { width: parent.width; text: modelData.label.toUpperCase(); color: window.ink; elide: Text.ElideRight; font.pixelSize: 8; font.weight: Font.Bold }
+                                                Label { width: parent.width; text: modelData.bytesText + "  ·  " + Math.round(modelData.percent) + "%"; color: window.ink; elide: Text.ElideRight; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold }
+                                            }
+                                        }
+                                    }
                                 }
-                                Label { text: qsTr("%1 REFS\n%2 SESSIONS").arg(modelData.references).arg(modelData.sessions); horizontalAlignment: Text.AlignRight; color: window.ink; font.pixelSize: 10; font.weight: Font.Bold }
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 70
+                                    color: repositoryDetailPanel.details.duplicateWorktrees > 0 ? window.yellow : "#e8e1d6"
+                                    border.color: window.ink
+                                    border.width: 2
+                                    Rectangle { width: 7; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: window.blue }
+                                    Label { anchors.fill: parent; anchors.leftMargin: 16; anchors.rightMargin: 9; anchors.topMargin: 6; anchors.bottomMargin: 6; text: repositoryDetailPanel.details.explanation || ""; color: window.ink; wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight; font.pixelSize: 9; font.weight: Font.Medium; verticalAlignment: Text.AlignVCenter }
+                                }
                             }
-                            ToolTip.visible: snapshotHover.hovered
-                            ToolTip.text: modelData.hash
-                            HoverHandler { id: snapshotHover }
                         }
-                        Label { anchors.centerIn: parent; visible: snapshotList.count === 0; text: qsTr("SELECT A REPOSITORY TO INSPECT SNAPSHOTS"); color: window.muted; font.weight: Font.Bold }
+                        Item {
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 7
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label { text: qsTr("CURRENT TREE PATH WEIGHT"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold; Layout.fillWidth: true }
+                                    Label { visible: repositoryDetailPanel.analysis.ready; text: qsTr("PACKED / EXPANDED"); color: window.muted; font.pixelSize: 8; font.weight: Font.Bold }
+                                }
+                                ListView {
+                                    id: pathUsageList
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    visible: repositoryDetailPanel.analysis.ready
+                                    clip: true
+                                    spacing: 4
+                                    model: repositoryDetailPanel.analysis.paths || []
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        width: pathUsageList.width
+                                        height: 37
+                                        color: window.paper
+                                        border.color: window.ink
+                                        border.width: 2
+                                        Rectangle { anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; width: Math.max(6, parent.width * modelData.percent / 100); color: "#c9d7ff" }
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 10
+                                            anchors.rightMargin: 9
+                                            Label { Layout.fillWidth: true; text: modelData.path; color: window.ink; elide: Text.ElideMiddle; font.family: "Space Grotesk"; font.pixelSize: 10; font.weight: Font.Bold }
+                                            Label { text: modelData.bytesText + " / " + modelData.expandedText; color: window.ink; font.pixelSize: 9; font.weight: Font.Bold }
+                                            Label { text: qsTr("%1 OBJ").arg(modelData.objects); color: window.muted; font.pixelSize: 8; font.weight: Font.Bold }
+                                        }
+                                    }
+                                }
+                                ColumnLayout {
+                                    Layout.alignment: Qt.AlignCenter
+                                    visible: !repositoryDetailPanel.analysis.ready
+                                    Label { text: snapshotController.analysisBusy ? qsTr("ANALYZING PACKS…") : qsTr("MAP PACKED BYTES BACK TO PROJECT PATHS"); color: window.muted; font.weight: Font.Bold }
+                                    BrutalButton { Layout.alignment: Qt.AlignHCenter; text: qsTr("Deep analyze"); enabled: !snapshotController.busy; onClicked: snapshotController.analyzeSelectedRepository() }
+                                }
+                            }
+                        }
+                        Item {
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 7
+                                Label { text: qsTr("LARGEST LOCAL GIT BLOBS"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold }
+                                ListView {
+                                    id: objectUsageList
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    visible: repositoryDetailPanel.analysis.ready
+                                    clip: true
+                                    spacing: 4
+                                    model: repositoryDetailPanel.analysis.objects || []
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        width: objectUsageList.width
+                                        height: 42
+                                        color: modelData.current ? window.paper : modelData.retained ? "#fff0ad" : "#ffd7d1"
+                                        border.color: window.ink
+                                        border.width: 2
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 9
+                                            anchors.rightMargin: 9
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 0
+                                                Label { Layout.fillWidth: true; text: modelData.path; color: window.ink; elide: Text.ElideMiddle; font.pixelSize: 10; font.weight: Font.Bold }
+                                                Label { text: modelData.shortOid + "  ·  " + (modelData.current ? qsTr("CURRENT") : modelData.retained ? qsTr("RETAINED HISTORY") : qsTr("UNPROTECTED HISTORY")); color: modelData.current ? window.blue : modelData.retained ? window.ink : window.red; font.family: "monospace"; font.pixelSize: 8; font.weight: Font.Bold }
+                                            }
+                                            Label { text: modelData.packedText + " / " + modelData.expandedText; color: window.ink; font.pixelSize: 9; font.weight: Font.Bold }
+                                        }
+                                    }
+                                }
+                                ColumnLayout {
+                                    Layout.alignment: Qt.AlignCenter
+                                    visible: !repositoryDetailPanel.analysis.ready
+                                    Label { text: snapshotController.analysisBusy ? qsTr("VERIFYING OBJECTS…") : qsTr("INSPECT COMPRESSED BLOBS AND REACHABILITY"); color: window.muted; font.weight: Font.Bold }
+                                    BrutalButton { Layout.alignment: Qt.AlignHCenter; text: qsTr("Deep analyze"); enabled: !snapshotController.busy; onClicked: snapshotController.analyzeSelectedRepository() }
+                                }
+                            }
+                        }
+                        Item {
+                            ColumnLayout {
+                                anchors.fill: parent
+                                spacing: 0
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 36
+                                    color: window.ink
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 13
+                                        anchors.rightMargin: 13
+                                        Label { text: qsTr("SNAPSHOT RECORDS"); color: window.white; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold; Layout.fillWidth: true }
+                                        Rectangle { implicitWidth: 11; implicitHeight: 11; color: window.yellow; border.color: window.white; border.width: 1 }
+                                        Label { text: qsTr("RETAINED"); color: window.white; font.pixelSize: 8; font.weight: Font.Bold }
+                                        Rectangle { implicitWidth: 11; implicitHeight: 11; color: window.red; border.color: window.white; border.width: 1 }
+                                        Label { text: qsTr("RELEASED"); color: window.white; font.pixelSize: 8; font.weight: Font.Bold }
+                                    }
+                                }
+                                ListView {
+                                    id: snapshotList
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    Layout.margins: 12
+                                    clip: true
+                                    spacing: 7
+                                    model: snapshotController.snapshots
+                                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        width: snapshotList.width - (snapshotList.ScrollBar.vertical.visible ? 10 : 0)
+                                        height: 88
+                                        color: window.paper
+                                        border.color: window.ink
+                                        border.width: 2
+                                        Rectangle { width: 10; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.keep ? window.yellow : window.red }
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 23
+                                            anchors.rightMargin: 12
+                                            anchors.topMargin: 9
+                                            anchors.bottomMargin: 9
+                                            spacing: 14
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 3
+                                                Label { Layout.fillWidth: true; text: modelData.title; color: window.ink; elide: Text.ElideRight; font.family: "Space Grotesk"; font.pixelSize: 14; font.weight: Font.Bold }
+                                                Label { text: modelData.shortHash + "  /  " + modelData.time + "  /  " + modelData.source.toUpperCase(); color: window.muted; font.family: "monospace"; font.pixelSize: 10 }
+                                                Label { text: modelData.keep ? modelData.reason.toUpperCase() : qsTr("OUTSIDE RETENTION POLICY"); color: modelData.keep ? window.ink : window.red; font.pixelSize: 10; font.weight: Font.Bold }
+                                            }
+                                            Label { text: qsTr("%1 REFS\n%2 SESSIONS").arg(modelData.references).arg(modelData.sessions); horizontalAlignment: Text.AlignRight; color: window.ink; font.pixelSize: 10; font.weight: Font.Bold }
+                                        }
+                                        ToolTip.visible: snapshotHover.hovered
+                                        ToolTip.text: modelData.hash
+                                        HoverHandler { id: snapshotHover }
+                                    }
+                                    Label { anchors.centerIn: parent; visible: snapshotList.count === 0; text: qsTr("SELECT A REPOSITORY TO INSPECT SNAPSHOTS"); color: window.muted; font.weight: Font.Bold }
+                                }
+                            }
+                        }
+                        Item {
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 8
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Rectangle {
+                                        Layout.fillWidth: true; implicitHeight: 74; color: "#e8e1d6"; border.color: window.ink; border.width: 2
+                                        Column { anchors.fill: parent; anchors.margins: 9; spacing: 3
+                                            Label { text: qsTr("SAFE PROJECT GC"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 11; font.weight: Font.Bold }
+                                            Label { width: parent.width; text: repositoryDetailPanel.analysis.ready ? qsTr("Estimated unprotected objects: %1").arg(repositoryDetailPanel.analysis.estimatedReclaimableText) : qsTr("Run deep analysis for a project estimate"); color: window.muted; wrapMode: Text.Wrap; font.pixelSize: 9 }
+                                        }
+                                    }
+                                    Rectangle {
+                                        Layout.fillWidth: true; implicitHeight: 74; color: "#ffd7d1"; border.color: window.ink; border.width: 2
+                                        Column { anchors.fill: parent; anchors.margins: 9; spacing: 3
+                                            Label { text: qsTr("RESET SNAPSHOT HISTORY"); color: window.red; font.family: "Space Grotesk"; font.pixelSize: 11; font.weight: Font.Bold }
+                                            Label { width: parent.width; text: repositoryDetailPanel.analysis.ready ? qsTr("Current-only estimate: %1. Discards old Undo trees.").arg(repositoryDetailPanel.analysis.resetReclaimableText) : qsTr("Preserve current state, discard old Undo trees. OpenCode must be closed."); color: window.ink; wrapMode: Text.Wrap; font.pixelSize: 9 }
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    implicitHeight: 67
+                                    color: window.yellow
+                                    border.color: window.ink
+                                    border.width: 2
+                                    Label { anchors.fill: parent; anchors.margins: 9; text: qsTr("Project reset will be enabled only after a dedicated preview proves that the current index tree can be recreated. Existing session Undo history for this project will no longer work after purge."); color: window.ink; wrapMode: Text.Wrap; font.pixelSize: 9; font.weight: Font.Bold }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    BrutalButton { text: repositoryDetailPanel.analysis.ready ? qsTr("Refresh analysis") : qsTr("Analyze first"); fillColor: window.blue; foregroundColor: window.white; hoverForegroundColor: window.blue; enabled: !snapshotController.busy; onClicked: snapshotController.analyzeSelectedRepository() }
+                                    Item { Layout.fillWidth: true }
+                                    BrutalButton {
+                                        text: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "safe" ? qsTr("Review safe plan") : qsTr("Preview safe GC")
+                                        fillColor: window.yellow
+                                        enabled: !snapshotController.busy
+                                        onClicked: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "safe" ? projectConfirmDialog.open() : snapshotController.previewProjectCleanup()
+                                    }
+                                    BrutalButton {
+                                        text: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "reset" ? qsTr("Review reset plan") : qsTr("Preview history reset")
+                                        fillColor: window.red
+                                        foregroundColor: window.white
+                                        hoverForegroundColor: window.red
+                                        enabled: !snapshotController.busy && repositoryDetailPanel.analysis.ready
+                                        onClicked: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "reset" ? projectConfirmDialog.open() : snapshotController.previewProjectReset()
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -849,6 +1042,105 @@ ApplicationWindow {
             }
             Label { text: qsTr("PROTECT %1 TREES  /  RELEASE %2 TREES").arg(snapshotController.planKeepTrees).arg(snapshotController.planRemoveTrees); color: window.red; font.family: "Space Grotesk"; font.pixelSize: 18; font.weight: Font.Bold }
             Label { Layout.fillWidth: true; text: qsTr("Directly removable LFS/temp files: %1. Git pack savings are measured after cleanup.").arg(snapshotController.formatBytes(snapshotController.estimatedReclaimableBytes)); color: window.blue; wrapMode: Text.Wrap; font.weight: Font.Bold }
+        }
+    }
+
+    Dialog {
+        id: projectConfirmDialog
+        property bool resetMode: snapshotController.projectPlanMode === "reset"
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(window.width - 80, 760)
+        padding: 24
+        closePolicy: Popup.CloseOnEscape
+        onOpened: {
+            projectClosedCheck.checked = false
+            projectNameConfirm.text = ""
+        }
+        Overlay.modal: Rectangle { color: "#991a1a1a" }
+        background: Rectangle { color: window.paper; border.color: window.ink; border.width: 3 }
+        header: Rectangle {
+            implicitHeight: 70
+            color: projectConfirmDialog.resetMode ? window.red : window.yellow
+            border.color: window.ink
+            border.width: 3
+            Label {
+                anchors.fill: parent
+                anchors.margins: 17
+                text: projectConfirmDialog.resetMode ? qsTr("CONFIRM HISTORY RESET") : qsTr("CONFIRM PROJECT CLEANUP")
+                color: projectConfirmDialog.resetMode ? window.white : window.ink
+                font.family: "Space Grotesk"
+                font.pixelSize: 22
+                font.weight: Font.Bold
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+        footer: Item {
+            implicitHeight: 76
+            RowLayout {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 12
+                BrutalButton { text: qsTr("Cancel"); fillColor: window.paper; hoverForegroundColor: window.paper; onClicked: projectConfirmDialog.reject() }
+                BrutalButton {
+                    text: projectConfirmDialog.resetMode ? qsTr("Reset history") : qsTr("Clean project")
+                    fillColor: projectConfirmDialog.resetMode ? window.red : window.yellow
+                    foregroundColor: projectConfirmDialog.resetMode ? window.white : window.ink
+                    hoverForegroundColor: projectConfirmDialog.resetMode ? window.red : window.yellow
+                    enabled: projectClosedCheck.checked && (!projectConfirmDialog.resetMode || projectNameConfirm.text === repositoryDetailPanel.details.name)
+                    onClicked: {
+                        projectConfirmDialog.accept()
+                        snapshotController.executeProjectAction()
+                    }
+                }
+            }
+        }
+        contentItem: ColumnLayout {
+            spacing: 13
+            Label { text: qsTr("SELECTED PROJECT"); color: window.ink; font.weight: Font.Bold; font.letterSpacing: 0.8 }
+            Label { Layout.fillWidth: true; text: repositoryDetailPanel.details.name; color: window.blue; wrapMode: Text.WrapAnywhere; font.family: "monospace"; font.weight: Font.Bold }
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: projectActionWarning.implicitHeight + 24
+                color: projectConfirmDialog.resetMode ? "#ffd7d1" : window.yellow
+                border.color: window.ink
+                border.width: 3
+                Label {
+                    id: projectActionWarning
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    text: projectConfirmDialog.resetMode
+                          ? qsTr("Keep the live index tree and remove historical snapshot objects. Old session Undo operations for this project may stop working. This cannot be undone by this tool.")
+                          : qsTr("Keep the current and retained trees, then prune only unprotected Git/LFS data. The measured result is shown after cleanup.")
+                    color: window.ink
+                    wrapMode: Text.Wrap
+                    font.weight: Font.Bold
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: projectConfirmDialog.resetMode
+                      ? qsTr("CURRENT-ONLY ESTIMATE %1  /  RELEASE %2 KNOWN TREES").arg(repositoryDetailPanel.analysis.resetReclaimableText).arg(snapshotController.projectPlanRemoveTrees)
+                      : qsTr("SAFE ESTIMATE %1  /  RELEASE %2 KNOWN TREES").arg(repositoryDetailPanel.analysis.estimatedReclaimableText).arg(snapshotController.projectPlanRemoveTrees)
+                color: projectConfirmDialog.resetMode ? window.red : window.blue
+                wrapMode: Text.Wrap
+                font.family: "Space Grotesk"
+                font.pixelSize: 16
+                font.weight: Font.Bold
+            }
+            BrutalCheckBox {
+                id: projectClosedCheck
+                Layout.fillWidth: true
+                text: qsTr("I closed OpenCode and no OpenCode process is using this project")
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: projectConfirmDialog.resetMode
+                spacing: 6
+                Label { Layout.fillWidth: true; text: qsTr("TYPE THE EXACT PROJECT NAME TO ENABLE RESET"); color: window.red; wrapMode: Text.Wrap; font.weight: Font.Bold; font.letterSpacing: 0.5 }
+                BrutalField { id: projectNameConfirm; Layout.fillWidth: true; placeholderText: repositoryDetailPanel.details.name }
+            }
+            Label { Layout.fillWidth: true; text: qsTr("Execution also refuses a history reset if Git lock files are present. The current index tree is checked again and protected immediately before cleanup."); color: window.muted; wrapMode: Text.Wrap; font.pixelSize: 10 }
         }
     }
 

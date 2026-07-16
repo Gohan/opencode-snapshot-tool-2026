@@ -10,6 +10,8 @@ class SnapshotCleaner {
   explicit SnapshotCleaner(GitClient git = {});
 
   CleanupPlan preview(const ScanResult& scan, const CleanupSettings& settings) const;
+  CleanupPlan previewReset(const RepositoryInfo& repository,
+                           const CleanupSettings& settings) const;
   CleanupResult execute(const CleanupPlan& plan, const CleanupSettings& settings) const;
 
  private:

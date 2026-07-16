@@ -20,6 +20,9 @@ SnapshotController::SnapshotController(QObject* parent) : QObject(parent), setti
       if (selectedRepository_ < 0 || scanResult_.repositories[index].actualBytes >
                                          scanResult_.repositories[selectedRepository_].actualBytes)
         selectedRepository_ = index;
+    repositoryAnalysis_ = {};
+    projectPlan_ = {};
+    projectPlanMode_.clear();
     cleanupPlan_ = {};
     auto message = tr("Found %1 repositories and %2 snapshot records")
                        .arg(repositoryCount()).arg(snapshotCount());
@@ -28,6 +31,7 @@ SnapshotController::SnapshotController(QObject* parent) : QObject(parent), setti
     setStatus(std::move(message));
     emit dataChanged();
     emit planChanged();
+    emit projectPlanChanged();
     notifyBusy();
   });
   connect(&previewWatcher_, &QFutureWatcher<CleanupPlan>::finished, this, [this] {
@@ -49,6 +53,36 @@ SnapshotController::SnapshotController(QObject* parent) : QObject(parent), setti
     notifyBusy();
     scan();
   });
+  connect(&analysisWatcher_, &QFutureWatcher<RepositoryAnalysis>::finished, this, [this] {
+    const auto analyzedIndex = analysisRepositoryIndex_;
+    const auto analysis = analysisWatcher_.result();
+    analysisRepositoryIndex_ = -1;
+    if (analyzedIndex == selectedRepository_) {
+      repositoryAnalysis_ = analysis;
+      setStatus(analysis.success
+                    ? tr("Deep analysis complete: %1 potentially reclaimable from unprotected Git objects")
+                          .arg(formatBytes(analysis.estimatedReclaimableBytes))
+                    : tr("Deep analysis failed: %1").arg(analysis.error));
+    }
+    emit analysisChanged();
+    notifyBusy();
+  });
+  connect(&projectPreviewWatcher_, &QFutureWatcher<CleanupPlan>::finished, this, [this] {
+    projectPlan_ = projectPreviewWatcher_.result();
+    if (!projectPlan_.error.isEmpty()) {
+      setStatus(tr("Project preview failed: %1").arg(projectPlan_.error));
+      projectPlan_ = {};
+      projectPlanMode_.clear();
+    } else {
+      setStatus(projectPlanMode_ == QStringLiteral("reset")
+                    ? tr("History reset preview ready: keep current state and release %1 known trees")
+                          .arg(projectPlan_.removeTrees)
+                    : tr("Project cleanup preview ready: release %1 trees outside retention")
+                          .arg(projectPlan_.removeTrees));
+    }
+    emit projectPlanChanged();
+    notifyBusy();
+  });
   setStatus(tr("Ready. Scan is read-only; cleanup always requires a preview and confirmation."));
 }
 
@@ -59,7 +93,11 @@ int SnapshotController::fallbackCount() const { return settings_.cleanup.fallbac
 bool SnapshotController::fullGc() const { return settings_.cleanup.fullGc; }
 bool SnapshotController::pruneLfs() const { return settings_.cleanup.pruneLfs; }
 int SnapshotController::staleFileHours() const { return settings_.cleanup.staleFileHours; }
-bool SnapshotController::busy() const { return scanWatcher_.isRunning() || previewWatcher_.isRunning() || cleanupWatcher_.isRunning(); }
+bool SnapshotController::busy() const { return scanWatcher_.isRunning() || previewWatcher_.isRunning() || cleanupWatcher_.isRunning() || analysisWatcher_.isRunning() || projectPreviewWatcher_.isRunning(); }
+bool SnapshotController::analysisBusy() const { return analysisWatcher_.isRunning(); }
+bool SnapshotController::hasProjectPlan() const { return !projectPlan_.repositories.isEmpty(); }
+QString SnapshotController::projectPlanMode() const { return projectPlanMode_; }
+int SnapshotController::projectPlanRemoveTrees() const { return projectPlan_.removeTrees; }
 QString SnapshotController::status() const { return status_; }
 int SnapshotController::selectedRepository() const { return selectedRepository_; }
 qint64 SnapshotController::totalBytes() const { return scanResult_.totalBytes; }
@@ -181,6 +219,56 @@ QVariantMap SnapshotController::selectedRepositoryDetails() const {
           {"explanation", explanation}};
 }
 
+QVariantMap SnapshotController::repositoryAnalysis() const {
+  if (!repositoryAnalysis_.success)
+    return {{"ready", false}, {"error", repositoryAnalysis_.error}};
+  const auto& analysis = repositoryAnalysis_;
+  const auto percent = [](qint64 part, qint64 total) {
+    return total > 0 ? static_cast<double>(part) * 100.0 / static_cast<double>(total) : 0.0;
+  };
+  QVariantList paths;
+  for (const auto& path : analysis.topPaths)
+    paths.push_back(QVariantMap{{"path", path.path}, {"bytes", path.packedBytes},
+                                {"bytesText", formatBytes(path.packedBytes)},
+                                {"expandedText", formatBytes(path.expandedBytes)},
+                                {"objects", path.objects},
+                                {"percent", percent(path.packedBytes, analysis.currentReachableBytes)}});
+  QVariantList objects;
+  for (const auto& object : analysis.largestObjects)
+    objects.push_back(QVariantMap{{"oid", object.oid}, {"shortOid", object.oid.left(10)},
+                                  {"path", object.path}, {"type", object.type},
+                                  {"expandedText", formatBytes(object.expandedBytes)},
+                                  {"packedText", formatBytes(object.packedBytes)},
+                                  {"current", object.current}, {"retained", object.retained}});
+  QVariantList packs;
+  for (const auto& pack : analysis.packs)
+    packs.push_back(QVariantMap{{"path", QDir::fromNativeSeparators(pack.path)},
+                                {"bytes", pack.bytes}, {"bytesText", formatBytes(pack.bytes)},
+                                {"objects", pack.objects}});
+  const auto retainedHistory = std::max<qint64>(0, analysis.retainedReachableBytes -
+                                                       analysis.currentReachableBytes);
+  const auto resetReclaimable = std::max<qint64>(0, analysis.packedPayloadBytes -
+                                                        analysis.currentReachableBytes);
+  return {{"ready", true}, {"currentTree", analysis.currentTree},
+          {"gitObjectFilesBytes", analysis.gitObjectFilesBytes},
+          {"gitObjectFilesText", formatBytes(analysis.gitObjectFilesBytes)},
+          {"packedPayloadText", formatBytes(analysis.packedPayloadBytes)},
+          {"currentReachableBytes", analysis.currentReachableBytes},
+          {"currentReachableText", formatBytes(analysis.currentReachableBytes)},
+          {"retainedHistoryBytes", retainedHistory},
+          {"retainedHistoryText", formatBytes(retainedHistory)},
+          {"estimatedReclaimableBytes", analysis.estimatedReclaimableBytes},
+          {"estimatedReclaimableText", formatBytes(analysis.estimatedReclaimableBytes)},
+          {"resetReclaimableBytes", resetReclaimable},
+          {"resetReclaimableText", formatBytes(resetReclaimable)},
+          {"currentPercent", percent(analysis.currentReachableBytes, analysis.packedPayloadBytes)},
+          {"retainedPercent", percent(retainedHistory, analysis.packedPayloadBytes)},
+          {"reclaimablePercent", percent(analysis.estimatedReclaimableBytes, analysis.packedPayloadBytes)},
+          {"localObjects", analysis.localObjects}, {"currentObjects", analysis.currentObjects},
+          {"retainedObjects", analysis.retainedObjects}, {"paths", paths},
+          {"objects", objects}, {"packs", packs}, {"warnings", analysis.warnings}};
+}
+
 QVariantList SnapshotController::snapshots() const {
   QVariantList rows;
   if (selectedRepository_ < 0 || selectedRepository_ >= scanResult_.repositories.size()) return rows;
@@ -239,10 +327,24 @@ void SnapshotController::setStaleFileHours(int value) {
     persistSettings();
   }
 }
-void SnapshotController::setSelectedRepository(int value) { if (value != selectedRepository_) { selectedRepository_ = value; emit dataChanged(); } }
+void SnapshotController::setSelectedRepository(int value) {
+  if (value == selectedRepository_) return;
+  selectedRepository_ = value;
+  repositoryAnalysis_ = {};
+  projectPlan_ = {};
+  projectPlanMode_.clear();
+  emit dataChanged();
+  emit analysisChanged();
+  emit projectPlanChanged();
+}
 
 void SnapshotController::scan() {
   if (busy()) return;
+  repositoryAnalysis_ = {};
+  projectPlan_ = {};
+  projectPlanMode_.clear();
+  emit analysisChanged();
+  emit projectPlanChanged();
   persistSettings();
   setStatus(tr("Scanning snapshot storage…"));
   notifyBusy();
@@ -279,6 +381,69 @@ void SnapshotController::executeCleanup() {
   notifyBusy();
 }
 
+void SnapshotController::analyzeSelectedRepository() {
+  if (busy() || selectedRepository_ < 0 || selectedRepository_ >= scanResult_.repositories.size()) return;
+  repositoryAnalysis_ = {};
+  analysisRepositoryIndex_ = selectedRepository_;
+  const auto repository = scanResult_.repositories[selectedRepository_];
+  QVector<QString> retained;
+  for (const auto& snapshot : repository.snapshots)
+    if (snapshot.keep && !retained.contains(snapshot.hash)) retained.push_back(snapshot.hash);
+  setStatus(tr("Deep-analyzing Git objects for %1…").arg(repository.relativePath));
+  emit analysisChanged();
+  notifyBusy();
+  analysisWatcher_.setFuture(QtConcurrent::run([repository, retained] {
+    return SnapshotAnalyzer().analyze(repository, retained);
+  }));
+}
+
+void SnapshotController::previewProjectCleanup() {
+  if (busy() || selectedRepository_ < 0 || selectedRepository_ >= scanResult_.repositories.size()) return;
+  projectPlan_ = {};
+  projectPlanMode_ = QStringLiteral("safe");
+  const auto repository = scanResult_.repositories[selectedRepository_];
+  const auto settings = cleanupSettings();
+  setStatus(tr("Previewing safe cleanup for %1…").arg(repository.relativePath));
+  emit projectPlanChanged();
+  notifyBusy();
+  projectPreviewWatcher_.setFuture(QtConcurrent::run([repository, settings] {
+    ScanResult scan;
+    scan.totalBytes = repository.actualBytes;
+    scan.repositories = {repository};
+    return SnapshotCleaner().preview(scan, settings);
+  }));
+}
+
+void SnapshotController::previewProjectReset() {
+  if (busy() || selectedRepository_ < 0 || selectedRepository_ >= scanResult_.repositories.size()) return;
+  projectPlan_ = {};
+  projectPlanMode_ = QStringLiteral("reset");
+  const auto repository = scanResult_.repositories[selectedRepository_];
+  const auto settings = cleanupSettings();
+  setStatus(tr("Previewing snapshot-history reset for %1…").arg(repository.relativePath));
+  emit projectPlanChanged();
+  notifyBusy();
+  projectPreviewWatcher_.setFuture(QtConcurrent::run([repository, settings] {
+    return SnapshotCleaner().previewReset(repository, settings);
+  }));
+}
+
+void SnapshotController::executeProjectAction() {
+  if (busy() || !hasProjectPlan()) return;
+  const auto plan = projectPlan_;
+  const auto settings = cleanupSettings();
+  setStatus(projectPlanMode_ == QStringLiteral("reset")
+                ? tr("Resetting selected project snapshot history. Do not start OpenCode…")
+                : tr("Cleaning selected project snapshot storage. Do not start OpenCode…"));
+  projectPlan_ = {};
+  projectPlanMode_.clear();
+  emit projectPlanChanged();
+  notifyBusy();
+  cleanupWatcher_.setFuture(QtConcurrent::run([plan, settings] {
+    return SnapshotCleaner().execute(plan, settings);
+  }));
+}
+
 void SnapshotController::chooseSnapshotRoot() {
   const auto path = QFileDialog::getExistingDirectory(nullptr, tr("Select OpenCode snapshot directory"), settings_.snapshotRoot);
   if (!path.isEmpty()) setSnapshotRoot(path);
@@ -296,7 +461,15 @@ QString SnapshotController::formatBytes(qint64 bytes) const {
   return QStringLiteral("%1 %2").arg(value, 0, unit == 0 ? 'f' : 'f', unit == 0 ? 0 : 2).arg(QString::fromLatin1(units[unit]));
 }
 
-void SnapshotController::persistSettings() { AppSettingsStore().save(settings_); emit settingsChanged(); cleanupPlan_ = {}; emit planChanged(); }
+void SnapshotController::persistSettings() {
+  AppSettingsStore().save(settings_);
+  emit settingsChanged();
+  cleanupPlan_ = {};
+  projectPlan_ = {};
+  projectPlanMode_.clear();
+  emit planChanged();
+  emit projectPlanChanged();
+}
 void SnapshotController::setStatus(QString value) { if (status_ != value) { status_ = std::move(value); emit statusChanged(); } }
 void SnapshotController::notifyBusy() { emit busyChanged(); }
 CleanupSettings SnapshotController::cleanupSettings() const { return settings_.cleanup; }

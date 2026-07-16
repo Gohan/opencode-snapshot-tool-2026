@@ -2,6 +2,7 @@ add_library(ost_core STATIC
   src/retention_policy.cpp
   src/git_client.cpp
   src/snapshot_scanner.cpp
+  src/snapshot_analyzer.cpp
   src/snapshot_cleaner.cpp
   src/app_settings.cpp
 )

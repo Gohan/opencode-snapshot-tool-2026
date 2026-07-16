@@ -80,6 +80,8 @@ struct CleanupPlan {
   qint64 estimatedReclaimableBytes = 0;
   int keepTrees = 0;
   int removeTrees = 0;
+  bool resetHistory = false;
+  QString error;
 };
 
 struct CleanupResult {

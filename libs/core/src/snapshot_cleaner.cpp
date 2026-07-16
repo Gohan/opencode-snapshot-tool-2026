@@ -49,6 +49,19 @@ qint64 staleBytes(const QString& gitDir, int staleHours) {
   }
   return total;
 }
+
+QStringList activeGitLocks(const QString& gitDir) {
+  QStringList result;
+  QDirIterator iterator(gitDir, QDir::Files | QDir::Hidden | QDir::System,
+                        QDirIterator::Subdirectories);
+  while (iterator.hasNext()) {
+    iterator.next();
+    const auto name = iterator.fileName();
+    if (name.endsWith(QStringLiteral(".lock")) || name == QStringLiteral("gc.pid"))
+      result.push_back(QDir(gitDir).relativeFilePath(iterator.filePath()));
+  }
+  return result;
+}
 }  // namespace
 
 namespace ost::core {
@@ -88,8 +101,46 @@ CleanupPlan SnapshotCleaner::preview(const ScanResult& scan, const CleanupSettin
   return plan;
 }
 
+CleanupPlan SnapshotCleaner::previewReset(const RepositoryInfo& repository,
+                                          const CleanupSettings& settings) const {
+  CleanupPlan failed;
+  failed.resetHistory = true;
+  const auto current = git_.run(repository.gitDir, {QStringLiteral("write-tree")});
+  const auto currentHash = QString::fromLatin1(current.output.trimmed());
+  if (!current.ok() || currentHash.size() != 40) {
+    failed.error = QStringLiteral("Could not protect the current index tree in %1: %2")
+                       .arg(repository.relativePath, QString::fromUtf8(current.error).trimmed());
+    return failed;
+  }
+
+  auto resetRepository = repository;
+  bool currentPresent = false;
+  for (auto& snapshot : resetRepository.snapshots) {
+    snapshot.keep = snapshot.hash == currentHash;
+    currentPresent = currentPresent || snapshot.hash == currentHash;
+  }
+  if (!currentPresent) {
+    SnapshotInfo currentSnapshot;
+    currentSnapshot.hash = currentHash;
+    currentSnapshot.exists = true;
+    currentSnapshot.keep = true;
+    currentSnapshot.source = SnapshotSource::CurrentIndex;
+    resetRepository.snapshots.push_back(currentSnapshot);
+  }
+  ScanResult scan;
+  scan.totalBytes = repository.actualBytes;
+  scan.repositories = {resetRepository};
+  auto plan = preview(scan, settings);
+  plan.resetHistory = true;
+  return plan;
+}
+
 CleanupResult SnapshotCleaner::execute(const CleanupPlan& plan, const CleanupSettings& settings) const {
   CleanupResult result;
+  if (!plan.error.isEmpty()) {
+    result.error = plan.error;
+    return result;
+  }
   qint64 plannedBytesAtPreview = 0;
   for (const auto& repository : plan.repositories) plannedBytesAtPreview += repository.currentBytes;
   const auto untouchedBytes = std::max<qint64>(0, plan.currentBytes - plannedBytesAtPreview);
@@ -97,6 +148,14 @@ CleanupResult SnapshotCleaner::execute(const CleanupPlan& plan, const CleanupSet
   for (const auto& repository : plan.repositories)
     result.bytesBefore += SnapshotScanner::directorySize(repository.gitDir);
   for (const auto& repository : plan.repositories) {
+    if (plan.resetHistory) {
+      const auto locks = activeGitLocks(repository.gitDir);
+      if (!locks.isEmpty()) {
+        result.error = QStringLiteral("Refusing snapshot-history reset because Git lock files exist in %1: %2")
+                           .arg(repository.relativePath, locks.join(QStringLiteral(", ")));
+        return result;
+      }
+    }
     auto keepHashes = repository.keepHashes;
     const auto currentTree = git_.run(repository.gitDir, {QStringLiteral("write-tree")});
     const auto currentHash = QString::fromLatin1(currentTree.output.trimmed());

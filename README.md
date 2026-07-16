@@ -2,18 +2,20 @@
 
 A cross-platform Qt 6 desktop application for inspecting OpenCode snapshot storage and safely reclaiming unreachable Git and Git LFS data.
 
-![OpenCode Snapshot Tool preview](docs/images/app-preview.png)
+![OpenCode Snapshot Tool repository storage details](docs/images/repository-storage-details-preview.png)
 
 ## What it does
 
 - Scans both legacy and project/worktree snapshot layouts.
 - Joins snapshot tree hashes to OpenCode session metadata from SQLite.
 - Reports the actual logical bytes under the snapshot root, including Git packs, Git LFS, metadata, and temporary pack files.
+- Deep-analyzes one repository into current-tree top-level paths, largest blobs, pack files, protected history, and unprotected Git objects.
 - Retains every snapshot seen within a configurable time window; if none are recent, retains the newest N trees per repository.
 - Always protects the current Git index tree.
 - Reports missing paths, database failures, and unmapped historical records without hiding partial results.
 - Produces a read-only cleanup preview before enabling the cleanup action.
 - Presents cleanup as an explicit two-step batch flow across all scanned repositories: batch preview first, then batch clean for the reviewed plan.
+- Offers a guarded per-project safe cleanup and an advanced current-state-only history reset; both require a dedicated preview and confirmation.
 - Protects retained trees with private refs before Git GC, fails closed on uncertain LFS reachability, and removes only stale temporary files.
 
 The default paths are discovered from `OPENCODE_DATA_HOME`, `XDG_DATA_HOME`, or the platform's normal OpenCode data directory. Settings are editable and persisted locally.
@@ -51,10 +53,12 @@ Run the development application on Windows from `build/dev/opencode-snapshot-too
 
 Scanning and previewing are read-only. Cleanup is enabled only after a preview and a confirmation dialog. Close OpenCode or ensure it is idle before cleanup. The retention age selects which snapshot trees are kept during preview. At execution, the tool protects those trees under `refs/opencode-snapshot-tool/keep/`, also protects the current index tree, and immediately prunes objects that are unreachable from every protected tree. Cleanup is destructive and cannot be undone from the application.
 
-Snapshot records are Git trees, not independent full copies. Releasing a tree may reclaim little or no space when its objects are shared with retained trees. The direct-file estimate covers removable LFS and stale temporary files only; Git pack savings are reported from the measured before/after size after cleanup.
+Snapshot records are Git trees, not independent full copies. Releasing a tree may reclaim little or no space when its objects are shared with retained trees. Deep analysis attributes packed Git blob bytes to their current-tree paths and separates the current state, retained history, and unprotected objects. Estimates remain estimates because Git may delta-compress and repack shared objects differently; the measured before/after result is authoritative.
+
+The advanced history reset keeps the live index tree and the snapshot repository structure so OpenCode can create future snapshots, but old session Undo hashes for that project can stop working. It requires OpenCode to be closed, exact project-name confirmation, and no active Git lock files. See [`docs/repository-analysis.md`](docs/repository-analysis.md) for the storage model and design rationale.
 
 ## Test strategy
 
-The core was developed test-first. Eight discovered tests cover retention boundaries, fallback quotas, current-index protection (including changes made after preview), directory discovery, exact filesystem sizing, actionable path warnings, real SQLite-to-Git tree mapping, distinct-session aggregation, and end-to-end preview/cleanup on an isolated synthetic repository. Real OpenCode data is used only for read-only scan and preview validation.
+The core was developed test-first. Eleven discovered tests cover retention boundaries, fallback quotas, current-index protection (including changes made after preview), directory discovery, exact filesystem sizing, actionable path warnings, real SQLite-to-Git tree mapping, distinct-session aggregation, deep Git-object reachability, lock refusal, and end-to-end cleanup/history-reset behavior on isolated synthetic repositories. Real OpenCode data is used only for read-only scan, analysis, and preview validation.
 
-Keyboard shortcuts: `Ctrl+,` opens settings and `Ctrl+P` starts a read-only cleanup preview.
+Keyboard shortcuts: `Ctrl+,` opens settings, `Ctrl+P` starts a read-only batch cleanup preview, `Ctrl+1` through `Ctrl+5` select a repository detail page, `Ctrl+D` runs deep analysis, and `Ctrl+Shift+R` previews/reviews a selected-project history reset.

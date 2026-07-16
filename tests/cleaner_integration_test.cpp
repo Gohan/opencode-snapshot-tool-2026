@@ -89,4 +89,59 @@ TEST(SnapshotCleaner, PreviewDoesNotWriteAndExecuteKeepsOnlyPlannedTrees) {
   EXPECT_FALSE(git.run(gitDir, {"cat-file", "-e", remove}).ok());
   EXPECT_LT(result.bytesAfter, bytesBeforeExecution - 1024 * 1024);
 }
+
+TEST(SnapshotCleaner, ResetPreviewKeepsCurrentStateAndAllowsFutureSnapshots) {
+  GitClient git;
+  if (!git.available()) GTEST_SKIP() << "git is required";
+  QTemporaryDir temp;
+  ASSERT_TRUE(temp.isValid());
+  const auto gitDir = QDir(temp.path()).filePath("snapshot.git");
+  ASSERT_TRUE(git.run(gitDir, {"init", "--bare"}).ok());
+  ASSERT_TRUE(git.run(gitDir, {"config", "snapshot.fixture", "preserved"}).ok());
+  const auto current = writeTree(git, gitDir, "current");
+  const auto history = writeTree(git, gitDir, deterministicNoise(2 * 1024 * 1024));
+  ASSERT_TRUE(git.run(gitDir, {"read-tree", current}).ok());
+
+  RepositoryInfo repository;
+  repository.gitDir = gitDir;
+  repository.relativePath = "project/worktree";
+  repository.actualBytes = ost::core::SnapshotScanner::directorySize(gitDir);
+  SnapshotInfo old;
+  old.hash = history;
+  old.keep = true;
+  repository.snapshots = {old};
+
+  SnapshotCleaner cleaner(git);
+  auto settings = CleanupSettings{};
+  settings.fullGc = true;
+  settings.pruneLfs = false;
+  const auto plan = cleaner.previewReset(repository, settings);
+
+  ASSERT_TRUE(plan.resetHistory);
+  ASSERT_EQ(plan.repositories.size(), 1);
+  EXPECT_EQ(plan.repositories.front().keepHashes, QVector<QString>{current});
+  EXPECT_TRUE(plan.repositories.front().removeHashes.contains(history));
+
+  const auto lockPath = QDir(gitDir).filePath(QStringLiteral("index.lock"));
+  QFile lock(lockPath);
+  ASSERT_TRUE(lock.open(QIODevice::WriteOnly));
+  ASSERT_GT(lock.write("active"), 0);
+  lock.close();
+  const auto blocked = cleaner.execute(plan, settings);
+  EXPECT_FALSE(blocked.success);
+  EXPECT_TRUE(blocked.error.contains(QStringLiteral("lock"), Qt::CaseInsensitive));
+  ASSERT_TRUE(QFile::remove(lockPath));
+
+  const auto result = cleaner.execute(plan, settings);
+  ASSERT_TRUE(result.success) << result.error.toStdString();
+  EXPECT_TRUE(git.run(gitDir, {"cat-file", "-e", current + "^{tree}"}).ok());
+  EXPECT_FALSE(git.run(gitDir, {"cat-file", "-e", history}).ok());
+  EXPECT_EQ(QString::fromUtf8(git.run(gitDir, {"config", "--get", "snapshot.fixture"})
+                                  .output.trimmed()),
+            QStringLiteral("preserved"));
+
+  const auto future = writeTree(git, gitDir, "future");
+  ASSERT_TRUE(git.run(gitDir, {"read-tree", future}).ok());
+  EXPECT_EQ(QString::fromLatin1(git.run(gitDir, {"write-tree"}).output.trimmed()), future);
+}
 }  // namespace
