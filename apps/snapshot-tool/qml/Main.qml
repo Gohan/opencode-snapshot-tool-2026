@@ -43,6 +43,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+3"; onActivated: repositoryTabs.currentIndex = 2 }
     Shortcut { sequence: "Ctrl+4"; onActivated: repositoryTabs.currentIndex = 3 }
     Shortcut { sequence: "Ctrl+5"; onActivated: repositoryTabs.currentIndex = 4 }
+    Shortcut { sequence: "Ctrl+6"; onActivated: repositoryTabs.currentIndex = 5 }
     Shortcut { sequence: "Ctrl+D"; enabled: !snapshotController.busy && snapshotController.selectedRepository >= 0; onActivated: snapshotController.analyzeSelectedRepository() }
     Shortcut {
         sequence: "Ctrl+Shift+R"
@@ -583,9 +584,10 @@ ApplicationWindow {
                         background: Rectangle { color: window.ink }
                         BrutalTabButton { text: qsTr("Overview"); onClicked: repositoryTabs.currentIndex = 0 }
                         BrutalTabButton { text: qsTr("Paths"); onClicked: repositoryTabs.currentIndex = 1 }
-                        BrutalTabButton { text: qsTr("Objects"); onClicked: repositoryTabs.currentIndex = 2 }
-                        BrutalTabButton { text: qsTr("Snapshots"); onClicked: repositoryTabs.currentIndex = 3 }
-                        BrutalTabButton { text: qsTr("Reclaim"); onClicked: repositoryTabs.currentIndex = 4 }
+                        BrutalTabButton { text: qsTr("Types"); onClicked: repositoryTabs.currentIndex = 2 }
+                        BrutalTabButton { text: qsTr("Objects"); onClicked: repositoryTabs.currentIndex = 3 }
+                        BrutalTabButton { text: qsTr("Snapshots"); onClicked: repositoryTabs.currentIndex = 4 }
+                        BrutalTabButton { text: qsTr("Reclaim"); onClicked: repositoryTabs.currentIndex = 5 }
                     }
                     StackLayout {
                         Layout.fillWidth: true
@@ -674,7 +676,21 @@ ApplicationWindow {
                                 spacing: 7
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    Label { text: qsTr("CURRENT TREE PATH WEIGHT"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold; Layout.fillWidth: true }
+                                    BrutalButton {
+                                        implicitWidth: 76
+                                        implicitHeight: 30
+                                        text: qsTr("UP")
+                                        fillColor: window.paper
+                                        hoverForegroundColor: window.paper
+                                        enabled: repositoryDetailPanel.analysis.canGoUp || false
+                                        onClicked: snapshotController.navigateAnalysisPathUp()
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 0
+                                        Label { text: qsTr("CURRENT TREE PATH WEIGHT"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold }
+                                        Label { Layout.fillWidth: true; text: "/" + (repositoryDetailPanel.analysis.analysisPath || ""); color: window.blue; elide: Text.ElideMiddle; font.family: "monospace"; font.pixelSize: 9; font.weight: Font.Bold }
+                                    }
                                     Label { visible: repositoryDetailPanel.analysis.ready; text: qsTr("PACKED / EXPANDED"); color: window.muted; font.pixelSize: 8; font.weight: Font.Bold }
                                 }
                                 ListView {
@@ -697,9 +713,22 @@ ApplicationWindow {
                                             anchors.fill: parent
                                             anchors.leftMargin: 10
                                             anchors.rightMargin: 9
-                                            Label { Layout.fillWidth: true; text: modelData.path; color: window.ink; elide: Text.ElideMiddle; font.family: "Space Grotesk"; font.pixelSize: 10; font.weight: Font.Bold }
+                                            Label { text: modelData.directory ? "▰" : "■"; color: modelData.directory ? window.blue : window.ink; font.pixelSize: 10; font.weight: Font.Bold }
+                                            Label { Layout.fillWidth: true; text: modelData.name; color: modelData.directory ? window.blue : window.ink; elide: Text.ElideMiddle; font.family: "Space Grotesk"; font.pixelSize: 10; font.weight: Font.Bold }
                                             Label { text: modelData.bytesText + " / " + modelData.expandedText; color: window.ink; font.pixelSize: 9; font.weight: Font.Bold }
                                             Label { text: qsTr("%1 OBJ").arg(modelData.objects); color: window.muted; font.pixelSize: 8; font.weight: Font.Bold }
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (modelData.directory) {
+                                                    snapshotController.navigateAnalysisPath(modelData.path)
+                                                } else {
+                                                    snapshotController.filterAnalysisObjects(modelData.path, "")
+                                                    repositoryTabs.currentIndex = 3
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -716,7 +745,91 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 anchors.margins: 12
                                 spacing: 7
-                                Label { text: qsTr("LARGEST LOCAL GIT BLOBS"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label { text: qsTr("CURRENT TREE FILE TYPES"); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold; Layout.fillWidth: true }
+                                    Label { visible: repositoryDetailPanel.analysis.ready; text: qsTr("PACKED / EXPANDED"); color: window.muted; font.pixelSize: 8; font.weight: Font.Bold }
+                                }
+                                Label { Layout.fillWidth: true; text: qsTr("Extensions are case-normalized. Packed bytes explain snapshot disk weight; expanded bytes explain original content weight."); color: window.muted; wrapMode: Text.Wrap; font.pixelSize: 9 }
+                                ListView {
+                                    id: fileTypeList
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    visible: repositoryDetailPanel.analysis.ready
+                                    clip: true
+                                    spacing: 4
+                                    model: repositoryDetailPanel.analysis.fileTypes || []
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        width: fileTypeList.width
+                                        height: 39
+                                        color: window.paper
+                                        border.color: window.ink
+                                        border.width: 2
+                                        Rectangle { anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; width: Math.max(6, parent.width * modelData.percent / 100); color: "#ffe681" }
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 10
+                                            anchors.rightMargin: 9
+                                            Label { Layout.fillWidth: true; text: modelData.suffix.toUpperCase(); color: window.ink; font.family: "Space Grotesk"; font.pixelSize: 11; font.weight: Font.Bold }
+                                            Label { text: modelData.bytesText + " / " + modelData.expandedText; color: window.ink; font.pixelSize: 9; font.weight: Font.Bold }
+                                            Label { text: qsTr("%1 FILES").arg(modelData.files); color: window.muted; font.pixelSize: 8; font.weight: Font.Bold }
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                snapshotController.filterAnalysisObjects("", modelData.suffix)
+                                                repositoryTabs.currentIndex = 3
+                                            }
+                                        }
+                                    }
+                                }
+                                ColumnLayout {
+                                    Layout.alignment: Qt.AlignCenter
+                                    visible: !repositoryDetailPanel.analysis.ready
+                                    Label { text: snapshotController.analysisBusy ? qsTr("CLASSIFYING FILE TYPES…") : qsTr("ANALYZE CURRENT SNAPSHOT CONTENT BY EXTENSION"); color: window.muted; font.weight: Font.Bold }
+                                    BrutalButton { Layout.alignment: Qt.AlignHCenter; text: qsTr("Deep analyze"); enabled: !snapshotController.busy; onClicked: snapshotController.analyzeSelectedRepository() }
+                                }
+                            }
+                        }
+                        Item {
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 7
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label { Layout.fillWidth: true; text: snapshotController.analysisObjectFilter.length ? qsTr("FILTERED GIT BLOBS · %1 MATCHES").arg(repositoryDetailPanel.analysis.objectMatches || 0) : qsTr("LARGEST LOCAL GIT BLOBS"); color: window.ink; elide: Text.ElideRight; font.family: "Space Grotesk"; font.pixelSize: 12; font.weight: Font.Bold }
+                                    Label { visible: snapshotController.analysisObjectFilter.length > 0; text: snapshotController.analysisObjectFilter; color: window.blue; elide: Text.ElideMiddle; Layout.maximumWidth: 260; font.family: "monospace"; font.pixelSize: 9; font.weight: Font.Bold }
+                                    BrutalButton { visible: snapshotController.analysisObjectFilter.length > 0; implicitWidth: 104; implicitHeight: 29; text: qsTr("CLEAR"); fillColor: window.paper; hoverForegroundColor: window.paper; onClicked: snapshotController.clearAnalysisObjectFilter() }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 5
+                                    Repeater {
+                                        model: [
+                                            { label: qsTr("CURRENT ONLY"), value: repositoryDetailPanel.analysis.currentExclusiveText || "—", color: window.blue },
+                                            { label: qsTr("CURRENT + HISTORY"), value: repositoryDetailPanel.analysis.currentSharedText || "—", color: window.yellow },
+                                            { label: qsTr("HISTORY ONLY"), value: repositoryDetailPanel.analysis.historyOnlyText || "—", color: "#d5c9ff" },
+                                            { label: qsTr("UNPROTECTED"), value: repositoryDetailPanel.analysis.estimatedReclaimableText || "—", color: window.red }
+                                        ]
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            Layout.fillWidth: true
+                                            implicitHeight: 49
+                                            color: window.paper
+                                            border.color: window.ink
+                                            border.width: 2
+                                            Rectangle { width: 7; anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom; color: modelData.color }
+                                            Column { anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 5; anchors.topMargin: 5; spacing: 0
+                                                Label { width: parent.width; text: modelData.label; color: window.muted; elide: Text.ElideRight; font.pixelSize: 7; font.weight: Font.Bold }
+                                                Label { width: parent.width; text: modelData.value; color: window.ink; elide: Text.ElideRight; font.family: "Space Grotesk"; font.pixelSize: 11; font.weight: Font.Bold }
+                                            }
+                                        }
+                                    }
+                                }
+                                Label { Layout.fillWidth: true; text: qsTr("Reachability classes describe who still needs each object. Only red unprotected payload is part of the safe-GC estimate; current-only payload is required by the live snapshot."); color: window.muted; wrapMode: Text.Wrap; font.pixelSize: 8 }
                                 ListView {
                                     id: objectUsageList
                                     Layout.fillWidth: true
@@ -740,7 +853,7 @@ ApplicationWindow {
                                                 Layout.fillWidth: true
                                                 spacing: 0
                                                 Label { Layout.fillWidth: true; text: modelData.path; color: window.ink; elide: Text.ElideMiddle; font.pixelSize: 10; font.weight: Font.Bold }
-                                                Label { text: modelData.shortOid + "  ·  " + (modelData.current ? qsTr("CURRENT") : modelData.retained ? qsTr("RETAINED HISTORY") : qsTr("UNPROTECTED HISTORY")); color: modelData.current ? window.blue : modelData.retained ? window.ink : window.red; font.family: "monospace"; font.pixelSize: 8; font.weight: Font.Bold }
+                                                Label { text: modelData.shortOid + "  ·  " + (modelData.current && modelData.history ? qsTr("CURRENT + RETAINED HISTORY") : modelData.current ? qsTr("CURRENT ONLY") : modelData.history ? qsTr("RETAINED HISTORY ONLY") : qsTr("UNPROTECTED HISTORY")); color: modelData.current ? window.blue : modelData.retained ? window.ink : window.red; font.family: "monospace"; font.pixelSize: 8; font.weight: Font.Bold }
                                             }
                                             Label { text: modelData.packedText + " / " + modelData.expandedText; color: window.ink; font.pixelSize: 9; font.weight: Font.Bold }
                                         }
@@ -835,6 +948,13 @@ ApplicationWindow {
                                             Label { width: parent.width; text: repositoryDetailPanel.analysis.ready ? qsTr("Current-only estimate: %1. Discards old Undo trees.").arg(repositoryDetailPanel.analysis.resetReclaimableText) : qsTr("Preserve current state, discard old Undo trees. OpenCode must be closed."); color: window.ink; wrapMode: Text.Wrap; font.pixelSize: 9 }
                                         }
                                     }
+                                    Rectangle {
+                                        Layout.fillWidth: true; implicitHeight: 74; color: window.red; border.color: window.ink; border.width: 2
+                                        Column { anchors.fill: parent; anchors.margins: 9; spacing: 3
+                                            Label { text: qsTr("PURGE ENTIRE STORE"); color: window.white; font.family: "Space Grotesk"; font.pixelSize: 11; font.weight: Font.Bold }
+                                            Label { width: parent.width; text: qsTr("Estimated %1. Removes current + historical Undo cache; OpenCode rebuilds later.").arg(repositoryDetailPanel.details.totalBytesText || "—"); color: window.white; wrapMode: Text.Wrap; font.pixelSize: 9 }
+                                        }
+                                    }
                                 }
                                 Rectangle {
                                     Layout.fillWidth: true
@@ -842,7 +962,7 @@ ApplicationWindow {
                                     color: window.yellow
                                     border.color: window.ink
                                     border.width: 2
-                                    Label { anchors.fill: parent; anchors.margins: 9; text: qsTr("Project reset will be enabled only after a dedicated preview proves that the current index tree can be recreated. Existing session Undo history for this project will no longer work after purge."); color: window.ink; wrapMode: Text.Wrap; font.pixelSize: 9; font.weight: Font.Bold }
+                                    Label { anchors.fill: parent; anchors.margins: 9; text: qsTr("Three different scopes: safe GC keeps policy-protected trees; history reset keeps the live tree; full-store purge deletes this snapshot repository so OpenCode must initialize it again. Neither reset nor purge is part of batch clean."); color: window.ink; wrapMode: Text.Wrap; font.pixelSize: 9; font.weight: Font.Bold }
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true
@@ -861,6 +981,14 @@ ApplicationWindow {
                                         hoverForegroundColor: window.red
                                         enabled: !snapshotController.busy && repositoryDetailPanel.analysis.ready
                                         onClicked: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "reset" ? projectConfirmDialog.open() : snapshotController.previewProjectReset()
+                                    }
+                                    BrutalButton {
+                                        text: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "purge" ? qsTr("Review store purge") : qsTr("Preview full purge")
+                                        fillColor: window.ink
+                                        foregroundColor: window.white
+                                        hoverForegroundColor: window.ink
+                                        enabled: !snapshotController.busy
+                                        onClicked: snapshotController.hasProjectPlan && snapshotController.projectPlanMode === "purge" ? projectConfirmDialog.open() : snapshotController.previewProjectPurge()
                                     }
                                 }
                             }
@@ -1048,6 +1176,8 @@ ApplicationWindow {
     Dialog {
         id: projectConfirmDialog
         property bool resetMode: snapshotController.projectPlanMode === "reset"
+        property bool purgeMode: snapshotController.projectPlanMode === "purge"
+        property bool destructiveMode: resetMode || purgeMode
         modal: true
         anchors.centerIn: Overlay.overlay
         width: Math.min(window.width - 80, 760)
@@ -1061,14 +1191,14 @@ ApplicationWindow {
         background: Rectangle { color: window.paper; border.color: window.ink; border.width: 3 }
         header: Rectangle {
             implicitHeight: 70
-            color: projectConfirmDialog.resetMode ? window.red : window.yellow
+            color: projectConfirmDialog.destructiveMode ? window.red : window.yellow
             border.color: window.ink
             border.width: 3
             Label {
                 anchors.fill: parent
                 anchors.margins: 17
-                text: projectConfirmDialog.resetMode ? qsTr("CONFIRM HISTORY RESET") : qsTr("CONFIRM PROJECT CLEANUP")
-                color: projectConfirmDialog.resetMode ? window.white : window.ink
+                text: projectConfirmDialog.purgeMode ? qsTr("CONFIRM FULL STORE PURGE") : projectConfirmDialog.resetMode ? qsTr("CONFIRM HISTORY RESET") : qsTr("CONFIRM PROJECT CLEANUP")
+                color: projectConfirmDialog.destructiveMode ? window.white : window.ink
                 font.family: "Space Grotesk"
                 font.pixelSize: 22
                 font.weight: Font.Bold
@@ -1083,11 +1213,11 @@ ApplicationWindow {
                 spacing: 12
                 BrutalButton { text: qsTr("Cancel"); fillColor: window.paper; hoverForegroundColor: window.paper; onClicked: projectConfirmDialog.reject() }
                 BrutalButton {
-                    text: projectConfirmDialog.resetMode ? qsTr("Reset history") : qsTr("Clean project")
-                    fillColor: projectConfirmDialog.resetMode ? window.red : window.yellow
-                    foregroundColor: projectConfirmDialog.resetMode ? window.white : window.ink
-                    hoverForegroundColor: projectConfirmDialog.resetMode ? window.red : window.yellow
-                    enabled: projectClosedCheck.checked && (!projectConfirmDialog.resetMode || projectNameConfirm.text === repositoryDetailPanel.details.name)
+                    text: projectConfirmDialog.purgeMode ? qsTr("Purge store") : projectConfirmDialog.resetMode ? qsTr("Reset history") : qsTr("Clean project")
+                    fillColor: projectConfirmDialog.destructiveMode ? window.red : window.yellow
+                    foregroundColor: projectConfirmDialog.destructiveMode ? window.white : window.ink
+                    hoverForegroundColor: projectConfirmDialog.destructiveMode ? window.red : window.yellow
+                    enabled: projectClosedCheck.checked && (!projectConfirmDialog.destructiveMode || projectNameConfirm.text === repositoryDetailPanel.details.name)
                     onClicked: {
                         projectConfirmDialog.accept()
                         snapshotController.executeProjectAction()
@@ -1102,14 +1232,16 @@ ApplicationWindow {
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: projectActionWarning.implicitHeight + 24
-                color: projectConfirmDialog.resetMode ? "#ffd7d1" : window.yellow
+                color: projectConfirmDialog.destructiveMode ? "#ffd7d1" : window.yellow
                 border.color: window.ink
                 border.width: 3
                 Label {
                     id: projectActionWarning
                     anchors.fill: parent
                     anchors.margins: 12
-                    text: projectConfirmDialog.resetMode
+                    text: projectConfirmDialog.purgeMode
+                          ? qsTr("Delete this entire Git snapshot store. Worktree files and opencode.db are not touched, and OpenCode can recreate the missing store on its next snapshot; every existing Undo hash for this store becomes unavailable.")
+                          : projectConfirmDialog.resetMode
                           ? qsTr("Keep the live index tree and remove historical snapshot objects. Old session Undo operations for this project may stop working. This cannot be undone by this tool.")
                           : qsTr("Keep the current and retained trees, then prune only unprotected Git/LFS data. The measured result is shown after cleanup.")
                     color: window.ink
@@ -1119,10 +1251,12 @@ ApplicationWindow {
             }
             Label {
                 Layout.fillWidth: true
-                text: projectConfirmDialog.resetMode
+                text: projectConfirmDialog.purgeMode
+                      ? qsTr("FULL STORE ESTIMATE %1  /  REMOVE ALL SNAPSHOT STATE").arg(snapshotController.formatBytes(snapshotController.projectPlanEstimatedBytes))
+                      : projectConfirmDialog.resetMode
                       ? qsTr("CURRENT-ONLY ESTIMATE %1  /  RELEASE %2 KNOWN TREES").arg(repositoryDetailPanel.analysis.resetReclaimableText).arg(snapshotController.projectPlanRemoveTrees)
                       : qsTr("SAFE ESTIMATE %1  /  RELEASE %2 KNOWN TREES").arg(repositoryDetailPanel.analysis.estimatedReclaimableText).arg(snapshotController.projectPlanRemoveTrees)
-                color: projectConfirmDialog.resetMode ? window.red : window.blue
+                color: projectConfirmDialog.destructiveMode ? window.red : window.blue
                 wrapMode: Text.Wrap
                 font.family: "Space Grotesk"
                 font.pixelSize: 16
@@ -1135,12 +1269,12 @@ ApplicationWindow {
             }
             ColumnLayout {
                 Layout.fillWidth: true
-                visible: projectConfirmDialog.resetMode
+                visible: projectConfirmDialog.destructiveMode
                 spacing: 6
-                Label { Layout.fillWidth: true; text: qsTr("TYPE THE EXACT PROJECT NAME TO ENABLE RESET"); color: window.red; wrapMode: Text.Wrap; font.weight: Font.Bold; font.letterSpacing: 0.5 }
+                Label { Layout.fillWidth: true; text: projectConfirmDialog.purgeMode ? qsTr("TYPE THE EXACT PROJECT NAME TO ENABLE FULL PURGE") : qsTr("TYPE THE EXACT PROJECT NAME TO ENABLE RESET"); color: window.red; wrapMode: Text.Wrap; font.weight: Font.Bold; font.letterSpacing: 0.5 }
                 BrutalField { id: projectNameConfirm; Layout.fillWidth: true; placeholderText: repositoryDetailPanel.details.name }
             }
-            Label { Layout.fillWidth: true; text: qsTr("Execution also refuses a history reset if Git lock files are present. The current index tree is checked again and protected immediately before cleanup."); color: window.muted; wrapMode: Text.Wrap; font.pixelSize: 10 }
+            Label { Layout.fillWidth: true; text: projectConfirmDialog.purgeMode ? qsTr("Execution canonicalizes the selected path, refuses anything outside the configured snapshot root, refuses Git locks, validates the live index again, and removes only this snapshot Git directory.") : projectConfirmDialog.resetMode ? qsTr("Execution refuses a history reset if Git lock files are present. The current index tree is checked again and protected immediately before cleanup.") : qsTr("Execution rechecks and protects the live index tree before pruning anything not reachable from the reviewed keep set."); color: window.muted; wrapMode: Text.Wrap; font.pixelSize: 10 }
         }
     }
 

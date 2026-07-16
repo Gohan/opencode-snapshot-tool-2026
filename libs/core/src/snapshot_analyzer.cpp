@@ -54,6 +54,12 @@ QString topLevelPath(const QString& path) {
   if (path.isEmpty() || !path.contains('/')) return QStringLiteral("(root files)");
   return path.section('/', 0, 0);
 }
+
+QString suffixFor(const QString& path) {
+  const auto suffix = QFileInfo(path).suffix().toLower();
+  return suffix.isEmpty() ? QStringLiteral("(no extension)")
+                          : QStringLiteral(".") + suffix;
+}
 }  // namespace
 
 namespace ost::core {
@@ -119,16 +125,22 @@ RepositoryAnalysis SnapshotAnalyzer::analyze(const RepositoryInfo& repository,
 
   auto protectedTrees = retainedTrees;
   if (!protectedTrees.contains(result.currentTree)) protectedTrees.push_back(result.currentTree);
+  auto historyTrees = retainedTrees;
+  historyTrees.erase(std::remove(historyTrees.begin(), historyTrees.end(), result.currentTree),
+                     historyTrees.end());
   auto knownTrees = protectedTrees;
   for (const auto& snapshot : repository.snapshots)
     if (!knownTrees.contains(snapshot.hash)) knownTrees.push_back(snapshot.hash);
 
   const auto currentReachability = reachable(git_, repository.gitDir, {result.currentTree});
+  const auto historyReachability = reachable(git_, repository.gitDir, historyTrees);
   const auto retainedReachability = reachable(git_, repository.gitDir, protectedTrees);
   const auto knownReachability = reachable(git_, repository.gitDir, knownTrees);
-  if (!currentReachability.error.isEmpty() || !retainedReachability.error.isEmpty()) {
-    result.error = QStringLiteral("Could not calculate Git object reachability: %1 %2")
-                       .arg(currentReachability.error, retainedReachability.error).trimmed();
+  if (!currentReachability.error.isEmpty() || !historyReachability.error.isEmpty() ||
+      !retainedReachability.error.isEmpty()) {
+    result.error = QStringLiteral("Could not calculate Git object reachability: %1 %2 %3")
+                       .arg(currentReachability.error, historyReachability.error,
+                            retainedReachability.error).trimmed();
     return result;
   }
   if (!knownReachability.error.isEmpty())
@@ -136,10 +148,13 @@ RepositoryAnalysis SnapshotAnalyzer::analyze(const RepositoryInfo& repository,
                                   .arg(knownReachability.error));
 
   QHash<QString, PathUsage> paths;
+  QHash<QString, PathUsage> pathEntries;
+  QHash<QString, FileTypeUsage> fileTypes;
   QVector<AnalyzedObject> objects;
   objects.reserve(local.size());
   for (auto it = local.cbegin(); it != local.cend(); ++it) {
     const bool isCurrent = currentReachability.objects.contains(it.key());
+    const bool isHistory = historyReachability.objects.contains(it.key());
     const bool isRetained = retainedReachability.objects.contains(it.key());
     if (isCurrent) {
       ++result.currentObjects;
@@ -149,6 +164,13 @@ RepositoryAnalysis SnapshotAnalyzer::analyze(const RepositoryInfo& repository,
       ++result.retainedObjects;
       result.retainedReachableBytes += it->packedBytes;
     }
+    if (isHistory) ++result.historyObjects;
+    if (isCurrent && isHistory)
+      result.currentSharedBytes += it->packedBytes;
+    else if (isCurrent)
+      result.currentExclusiveBytes += it->packedBytes;
+    else if (isHistory)
+      result.historyOnlyBytes += it->packedBytes;
     const auto path = currentReachability.paths.value(
         it.key(), knownReachability.paths.value(it.key(), QStringLiteral("(history-only / internal)")));
     if (it->type == QStringLiteral("blob") && isCurrent) {
@@ -158,10 +180,33 @@ RepositoryAnalysis SnapshotAnalyzer::analyze(const RepositoryInfo& repository,
       usage.expandedBytes += it->expandedBytes;
       usage.packedBytes += it->packedBytes;
       ++usage.objects;
+
+      const auto parts = path.split(QChar('/'), Qt::SkipEmptyParts);
+      QString parent;
+      for (int index = 0; index < parts.size(); ++index) {
+        const auto fullPath = parent.isEmpty() ? parts[index]
+                                                : parent + QChar('/') + parts[index];
+        auto& entry = pathEntries[fullPath];
+        entry.path = fullPath;
+        entry.name = parts[index];
+        entry.parent = parent;
+        entry.directory = index + 1 < parts.size();
+        entry.expandedBytes += it->expandedBytes;
+        entry.packedBytes += it->packedBytes;
+        ++entry.objects;
+        parent = fullPath;
+      }
+
+      const auto suffix = suffixFor(path);
+      auto& type = fileTypes[suffix];
+      type.suffix = suffix;
+      type.expandedBytes += it->expandedBytes;
+      type.packedBytes += it->packedBytes;
+      ++type.files;
     }
     if (it->type == QStringLiteral("blob"))
       objects.push_back({it->oid, it->type, path, it->expandedBytes, it->packedBytes,
-                         isCurrent, isRetained});
+                         isCurrent, isRetained, isHistory});
   }
 
   result.estimatedReclaimableBytes =
@@ -170,10 +215,22 @@ RepositoryAnalysis SnapshotAnalyzer::analyze(const RepositoryInfo& repository,
   std::sort(result.topPaths.begin(), result.topPaths.end(),
             [](const auto& left, const auto& right) { return left.packedBytes > right.packedBytes; });
   if (result.topPaths.size() > 20) result.topPaths.resize(20);
+  result.pathEntries = pathEntries.values();
+  std::sort(result.pathEntries.begin(), result.pathEntries.end(), [](const auto& left,
+                                                                     const auto& right) {
+    if (left.parent != right.parent) return left.parent < right.parent;
+    if (left.directory != right.directory) return left.directory;
+    if (left.packedBytes != right.packedBytes) return left.packedBytes > right.packedBytes;
+    return left.name < right.name;
+  });
+  result.fileTypes = fileTypes.values();
+  std::sort(result.fileTypes.begin(), result.fileTypes.end(), [](const auto& left,
+                                                                 const auto& right) {
+    return left.packedBytes > right.packedBytes;
+  });
   std::sort(objects.begin(), objects.end(), [](const auto& left, const auto& right) {
     return left.packedBytes > right.packedBytes;
   });
-  if (objects.size() > 50) objects.resize(50);
   result.largestObjects = std::move(objects);
   std::sort(result.packs.begin(), result.packs.end(),
             [](const auto& left, const auto& right) { return left.bytes > right.bytes; });

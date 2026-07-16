@@ -62,6 +62,22 @@ QStringList activeGitLocks(const QString& gitDir) {
   }
   return result;
 }
+
+QString purgePathError(const QString& snapshotRoot, const QString& gitDir) {
+  const auto root = QDir::fromNativeSeparators(QFileInfo(snapshotRoot).canonicalFilePath());
+  const auto target = QDir::fromNativeSeparators(QFileInfo(gitDir).canonicalFilePath());
+  if (root.isEmpty() || target.isEmpty())
+    return QStringLiteral("Snapshot root or repository path does not exist");
+  const auto rootPrefix = root.endsWith(QChar('/')) ? root : root + QChar('/');
+#ifdef Q_OS_WIN
+  const auto sensitivity = Qt::CaseInsensitive;
+#else
+  const auto sensitivity = Qt::CaseSensitive;
+#endif
+  if (target.compare(root, sensitivity) == 0 || !target.startsWith(rootPrefix, sensitivity))
+    return QStringLiteral("Repository is not a child of the configured snapshot root");
+  return {};
+}
 }  // namespace
 
 namespace ost::core {
@@ -135,6 +151,36 @@ CleanupPlan SnapshotCleaner::previewReset(const RepositoryInfo& repository,
   return plan;
 }
 
+CleanupPlan SnapshotCleaner::previewPurge(const RepositoryInfo& repository,
+                                          const QString& snapshotRoot) const {
+  CleanupPlan plan;
+  plan.purgeStore = true;
+  if (const auto pathError = purgePathError(snapshotRoot, repository.gitDir);
+      !pathError.isEmpty()) {
+    plan.error = QStringLiteral("Refusing full-store purge for %1: %2")
+                     .arg(repository.relativePath, pathError);
+    return plan;
+  }
+  const auto current = git_.run(repository.gitDir, {QStringLiteral("write-tree")});
+  if (!current.ok() || current.output.trimmed().size() != 40) {
+    plan.error = QStringLiteral("Could not validate the live snapshot store in %1: %2")
+                     .arg(repository.relativePath, QString::fromUtf8(current.error).trimmed());
+    return plan;
+  }
+  RepositoryCleanupPlan item;
+  item.gitDir = repository.gitDir;
+  item.relativePath = repository.relativePath;
+  item.allowedRoot = snapshotRoot;
+  item.currentBytes = SnapshotScanner::directorySize(repository.gitDir);
+  for (const auto& snapshot : repository.snapshots)
+    if (!item.removeHashes.contains(snapshot.hash)) item.removeHashes.push_back(snapshot.hash);
+  plan.currentBytes = item.currentBytes;
+  plan.estimatedReclaimableBytes = item.currentBytes;
+  plan.removeTrees = item.removeHashes.size();
+  plan.repositories = {item};
+  return plan;
+}
+
 CleanupResult SnapshotCleaner::execute(const CleanupPlan& plan, const CleanupSettings& settings) const {
   CleanupResult result;
   if (!plan.error.isEmpty()) {
@@ -148,6 +194,35 @@ CleanupResult SnapshotCleaner::execute(const CleanupPlan& plan, const CleanupSet
   for (const auto& repository : plan.repositories)
     result.bytesBefore += SnapshotScanner::directorySize(repository.gitDir);
   for (const auto& repository : plan.repositories) {
+    if (plan.purgeStore) {
+      if (const auto pathError = purgePathError(repository.allowedRoot, repository.gitDir);
+          !pathError.isEmpty()) {
+        result.error = QStringLiteral("Refusing full-store purge for %1: %2")
+                           .arg(repository.relativePath, pathError);
+        return result;
+      }
+      const auto locks = activeGitLocks(repository.gitDir);
+      if (!locks.isEmpty()) {
+        result.error = QStringLiteral("Refusing full-store purge because Git lock files exist in %1: %2")
+                           .arg(repository.relativePath, locks.join(QStringLiteral(", ")));
+        return result;
+      }
+      const auto currentTree = git_.run(repository.gitDir, {QStringLiteral("write-tree")});
+      if (!currentTree.ok() || currentTree.output.trimmed().size() != 40) {
+        result.error = QStringLiteral("Refusing full-store purge because the live index cannot be validated in %1: %2")
+                           .arg(repository.relativePath,
+                                QString::fromUtf8(currentTree.error).trimmed());
+        return result;
+      }
+      if (!QDir(repository.gitDir).removeRecursively()) {
+        result.error = QStringLiteral("Failed to remove the snapshot store for %1")
+                           .arg(repository.relativePath);
+        return result;
+      }
+      result.messages.push_back(QStringLiteral("Removed snapshot store for %1; OpenCode will recreate it on the next snapshot")
+                                    .arg(repository.relativePath));
+      continue;
+    }
     if (plan.resetHistory) {
       const auto locks = activeGitLocks(repository.gitDir);
       if (!locks.isEmpty()) {

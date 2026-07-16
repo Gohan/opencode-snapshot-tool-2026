@@ -26,9 +26,12 @@ class SnapshotController final : public QObject {
   Q_PROPERTY(QVariantMap selectedRepositoryDetails READ selectedRepositoryDetails NOTIFY dataChanged)
   Q_PROPERTY(bool analysisBusy READ analysisBusy NOTIFY busyChanged)
   Q_PROPERTY(QVariantMap repositoryAnalysis READ repositoryAnalysis NOTIFY analysisChanged)
+  Q_PROPERTY(QString analysisPath READ analysisPath NOTIFY analysisChanged)
+  Q_PROPERTY(QString analysisObjectFilter READ analysisObjectFilter NOTIFY analysisChanged)
   Q_PROPERTY(bool hasProjectPlan READ hasProjectPlan NOTIFY projectPlanChanged)
   Q_PROPERTY(QString projectPlanMode READ projectPlanMode NOTIFY projectPlanChanged)
   Q_PROPERTY(int projectPlanRemoveTrees READ projectPlanRemoveTrees NOTIFY projectPlanChanged)
+  Q_PROPERTY(qint64 projectPlanEstimatedBytes READ projectPlanEstimatedBytes NOTIFY projectPlanChanged)
   Q_PROPERTY(int selectedRepository READ selectedRepository WRITE setSelectedRepository NOTIFY dataChanged)
   Q_PROPERTY(qint64 totalBytes READ totalBytes NOTIFY dataChanged)
   Q_PROPERTY(int repositoryCount READ repositoryCount NOTIFY dataChanged)
@@ -57,9 +60,12 @@ class SnapshotController final : public QObject {
   QVariantMap selectedRepositoryDetails() const;
   bool analysisBusy() const;
   QVariantMap repositoryAnalysis() const;
+  QString analysisPath() const;
+  QString analysisObjectFilter() const;
   bool hasProjectPlan() const;
   QString projectPlanMode() const;
   int projectPlanRemoveTrees() const;
+  qint64 projectPlanEstimatedBytes() const;
   int selectedRepository() const;
   qint64 totalBytes() const;
   int repositoryCount() const;
@@ -84,8 +90,13 @@ class SnapshotController final : public QObject {
   Q_INVOKABLE void previewCleanup();
   Q_INVOKABLE void executeCleanup();
   Q_INVOKABLE void analyzeSelectedRepository();
+  Q_INVOKABLE void navigateAnalysisPath(const QString& path);
+  Q_INVOKABLE void navigateAnalysisPathUp();
+  Q_INVOKABLE void filterAnalysisObjects(const QString& path, const QString& suffix);
+  Q_INVOKABLE void clearAnalysisObjectFilter();
   Q_INVOKABLE void previewProjectCleanup();
   Q_INVOKABLE void previewProjectReset();
+  Q_INVOKABLE void previewProjectPurge();
   Q_INVOKABLE void executeProjectAction();
   Q_INVOKABLE void chooseSnapshotRoot();
   Q_INVOKABLE void chooseDatabase();
@@ -117,7 +128,11 @@ class SnapshotController final : public QObject {
   QFutureWatcher<ost::core::RepositoryAnalysis> analysisWatcher_;
   ost::core::RepositoryAnalysis repositoryAnalysis_;
   int analysisRepositoryIndex_ = -1;
+  QString analysisPath_;
+  QString analysisObjectPathFilter_;
+  QString analysisObjectSuffixFilter_;
   QFutureWatcher<ost::core::CleanupPlan> projectPreviewWatcher_;
+  int projectPreviewRepositoryIndex_ = -1;
   ost::core::CleanupPlan projectPlan_;
   QString projectPlanMode_;
 };

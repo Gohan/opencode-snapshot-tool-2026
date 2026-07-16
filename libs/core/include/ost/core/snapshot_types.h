@@ -67,6 +67,7 @@ struct CleanupSettings : RetentionSettings {
 struct RepositoryCleanupPlan {
   QString gitDir;
   QString relativePath;
+  QString allowedRoot;
   QVector<QString> keepHashes;
   QVector<QString> removeHashes;
   qint64 currentBytes = 0;
@@ -81,6 +82,7 @@ struct CleanupPlan {
   int keepTrees = 0;
   int removeTrees = 0;
   bool resetHistory = false;
+  bool purgeStore = false;
   QString error;
 };
 

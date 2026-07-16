@@ -12,6 +12,8 @@ class SnapshotCleaner {
   CleanupPlan preview(const ScanResult& scan, const CleanupSettings& settings) const;
   CleanupPlan previewReset(const RepositoryInfo& repository,
                            const CleanupSettings& settings) const;
+  CleanupPlan previewPurge(const RepositoryInfo& repository,
+                           const QString& snapshotRoot) const;
   CleanupResult execute(const CleanupPlan& plan, const CleanupSettings& settings) const;
 
  private:

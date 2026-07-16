@@ -6,11 +6,20 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QtConcurrent>
 
 #include <algorithm>
 
 using namespace ost::core;
+
+namespace {
+QString objectSuffix(const QString& path) {
+  const auto suffix = QFileInfo(path).suffix().toLower();
+  return suffix.isEmpty() ? QStringLiteral("(no extension)")
+                          : QStringLiteral(".") + suffix;
+}
+}  // namespace
 
 SnapshotController::SnapshotController(QObject* parent) : QObject(parent), settings_(AppSettingsStore().load()) {
   connect(&scanWatcher_, &QFutureWatcher<ScanResult>::finished, this, [this] {
@@ -21,6 +30,9 @@ SnapshotController::SnapshotController(QObject* parent) : QObject(parent), setti
                                          scanResult_.repositories[selectedRepository_].actualBytes)
         selectedRepository_ = index;
     repositoryAnalysis_ = {};
+    analysisPath_.clear();
+    analysisObjectPathFilter_.clear();
+    analysisObjectSuffixFilter_.clear();
     projectPlan_ = {};
     projectPlanMode_.clear();
     cleanupPlan_ = {};
@@ -68,6 +80,16 @@ SnapshotController::SnapshotController(QObject* parent) : QObject(parent), setti
     notifyBusy();
   });
   connect(&projectPreviewWatcher_, &QFutureWatcher<CleanupPlan>::finished, this, [this] {
+    const auto previewIndex = projectPreviewRepositoryIndex_;
+    projectPreviewRepositoryIndex_ = -1;
+    if (previewIndex != selectedRepository_) {
+      projectPlan_ = {};
+      projectPlanMode_.clear();
+      setStatus(tr("Discarded project preview because the selected repository changed"));
+      emit projectPlanChanged();
+      notifyBusy();
+      return;
+    }
     projectPlan_ = projectPreviewWatcher_.result();
     if (!projectPlan_.error.isEmpty()) {
       setStatus(tr("Project preview failed: %1").arg(projectPlan_.error));
@@ -77,6 +99,9 @@ SnapshotController::SnapshotController(QObject* parent) : QObject(parent), setti
       setStatus(projectPlanMode_ == QStringLiteral("reset")
                     ? tr("History reset preview ready: keep current state and release %1 known trees")
                           .arg(projectPlan_.removeTrees)
+                    : projectPlanMode_ == QStringLiteral("purge")
+                    ? tr("Full-store purge preview ready: remove %1 and all Undo state for this repository")
+                          .arg(formatBytes(projectPlan_.estimatedReclaimableBytes))
                     : tr("Project cleanup preview ready: release %1 trees outside retention")
                           .arg(projectPlan_.removeTrees));
     }
@@ -95,9 +120,17 @@ bool SnapshotController::pruneLfs() const { return settings_.cleanup.pruneLfs; }
 int SnapshotController::staleFileHours() const { return settings_.cleanup.staleFileHours; }
 bool SnapshotController::busy() const { return scanWatcher_.isRunning() || previewWatcher_.isRunning() || cleanupWatcher_.isRunning() || analysisWatcher_.isRunning() || projectPreviewWatcher_.isRunning(); }
 bool SnapshotController::analysisBusy() const { return analysisWatcher_.isRunning(); }
+QString SnapshotController::analysisPath() const { return analysisPath_; }
+QString SnapshotController::analysisObjectFilter() const {
+  if (!analysisObjectPathFilter_.isEmpty()) return analysisObjectPathFilter_;
+  return analysisObjectSuffixFilter_;
+}
 bool SnapshotController::hasProjectPlan() const { return !projectPlan_.repositories.isEmpty(); }
 QString SnapshotController::projectPlanMode() const { return projectPlanMode_; }
 int SnapshotController::projectPlanRemoveTrees() const { return projectPlan_.removeTrees; }
+qint64 SnapshotController::projectPlanEstimatedBytes() const {
+  return projectPlan_.estimatedReclaimableBytes;
+}
 QString SnapshotController::status() const { return status_; }
 int SnapshotController::selectedRepository() const { return selectedRepository_; }
 qint64 SnapshotController::totalBytes() const { return scanResult_.totalBytes; }
@@ -227,19 +260,38 @@ QVariantMap SnapshotController::repositoryAnalysis() const {
     return total > 0 ? static_cast<double>(part) * 100.0 / static_cast<double>(total) : 0.0;
   };
   QVariantList paths;
-  for (const auto& path : analysis.topPaths)
-    paths.push_back(QVariantMap{{"path", path.path}, {"bytes", path.packedBytes},
+  for (const auto& path : analysis.pathEntries) {
+    if (path.parent != analysisPath_) continue;
+    paths.push_back(QVariantMap{{"path", path.path}, {"name", path.name},
+                                {"directory", path.directory},
+                                {"bytes", path.packedBytes},
                                 {"bytesText", formatBytes(path.packedBytes)},
                                 {"expandedText", formatBytes(path.expandedBytes)},
                                 {"objects", path.objects},
                                 {"percent", percent(path.packedBytes, analysis.currentReachableBytes)}});
+  }
+  QVariantList fileTypes;
+  for (const auto& type : analysis.fileTypes)
+    fileTypes.push_back(QVariantMap{{"suffix", type.suffix}, {"bytes", type.packedBytes},
+                                    {"bytesText", formatBytes(type.packedBytes)},
+                                    {"expandedText", formatBytes(type.expandedBytes)},
+                                    {"files", type.files},
+                                    {"percent", percent(type.packedBytes, analysis.currentReachableBytes)}});
   QVariantList objects;
-  for (const auto& object : analysis.largestObjects)
+  int objectMatches = 0;
+  for (const auto& object : analysis.largestObjects) {
+    if (!analysisObjectPathFilter_.isEmpty() && object.path != analysisObjectPathFilter_) continue;
+    if (!analysisObjectSuffixFilter_.isEmpty() &&
+        objectSuffix(object.path) != analysisObjectSuffixFilter_) continue;
+    ++objectMatches;
+    if (objects.size() >= 100) continue;
     objects.push_back(QVariantMap{{"oid", object.oid}, {"shortOid", object.oid.left(10)},
                                   {"path", object.path}, {"type", object.type},
                                   {"expandedText", formatBytes(object.expandedBytes)},
                                   {"packedText", formatBytes(object.packedBytes)},
-                                  {"current", object.current}, {"retained", object.retained}});
+                                  {"current", object.current}, {"retained", object.retained},
+                                  {"history", object.history}});
+  }
   QVariantList packs;
   for (const auto& pack : analysis.packs)
     packs.push_back(QVariantMap{{"path", QDir::fromNativeSeparators(pack.path)},
@@ -257,6 +309,12 @@ QVariantMap SnapshotController::repositoryAnalysis() const {
           {"currentReachableText", formatBytes(analysis.currentReachableBytes)},
           {"retainedHistoryBytes", retainedHistory},
           {"retainedHistoryText", formatBytes(retainedHistory)},
+          {"currentExclusiveBytes", analysis.currentExclusiveBytes},
+          {"currentExclusiveText", formatBytes(analysis.currentExclusiveBytes)},
+          {"currentSharedBytes", analysis.currentSharedBytes},
+          {"currentSharedText", formatBytes(analysis.currentSharedBytes)},
+          {"historyOnlyBytes", analysis.historyOnlyBytes},
+          {"historyOnlyText", formatBytes(analysis.historyOnlyBytes)},
           {"estimatedReclaimableBytes", analysis.estimatedReclaimableBytes},
           {"estimatedReclaimableText", formatBytes(analysis.estimatedReclaimableBytes)},
           {"resetReclaimableBytes", resetReclaimable},
@@ -265,8 +323,11 @@ QVariantMap SnapshotController::repositoryAnalysis() const {
           {"retainedPercent", percent(retainedHistory, analysis.packedPayloadBytes)},
           {"reclaimablePercent", percent(analysis.estimatedReclaimableBytes, analysis.packedPayloadBytes)},
           {"localObjects", analysis.localObjects}, {"currentObjects", analysis.currentObjects},
-          {"retainedObjects", analysis.retainedObjects}, {"paths", paths},
-          {"objects", objects}, {"packs", packs}, {"warnings", analysis.warnings}};
+          {"retainedObjects", analysis.retainedObjects}, {"historyObjects", analysis.historyObjects},
+          {"analysisPath", analysisPath_}, {"canGoUp", !analysisPath_.isEmpty()},
+          {"objectFilter", analysisObjectFilter()}, {"objectMatches", objectMatches},
+          {"paths", paths}, {"fileTypes", fileTypes}, {"objects", objects},
+          {"packs", packs}, {"warnings", analysis.warnings}};
 }
 
 QVariantList SnapshotController::snapshots() const {
@@ -331,6 +392,9 @@ void SnapshotController::setSelectedRepository(int value) {
   if (value == selectedRepository_) return;
   selectedRepository_ = value;
   repositoryAnalysis_ = {};
+  analysisPath_.clear();
+  analysisObjectPathFilter_.clear();
+  analysisObjectSuffixFilter_.clear();
   projectPlan_ = {};
   projectPlanMode_.clear();
   emit dataChanged();
@@ -341,6 +405,9 @@ void SnapshotController::setSelectedRepository(int value) {
 void SnapshotController::scan() {
   if (busy()) return;
   repositoryAnalysis_ = {};
+  analysisPath_.clear();
+  analysisObjectPathFilter_.clear();
+  analysisObjectSuffixFilter_.clear();
   projectPlan_ = {};
   projectPlanMode_.clear();
   emit analysisChanged();
@@ -384,6 +451,9 @@ void SnapshotController::executeCleanup() {
 void SnapshotController::analyzeSelectedRepository() {
   if (busy() || selectedRepository_ < 0 || selectedRepository_ >= scanResult_.repositories.size()) return;
   repositoryAnalysis_ = {};
+  analysisPath_.clear();
+  analysisObjectPathFilter_.clear();
+  analysisObjectSuffixFilter_.clear();
   analysisRepositoryIndex_ = selectedRepository_;
   const auto repository = scanResult_.repositories[selectedRepository_];
   QVector<QString> retained;
@@ -397,11 +467,46 @@ void SnapshotController::analyzeSelectedRepository() {
   }));
 }
 
+void SnapshotController::navigateAnalysisPath(const QString& path) {
+  if (!repositoryAnalysis_.success) return;
+  const auto normalized = QDir::fromNativeSeparators(path).remove(QRegularExpression(QStringLiteral("^/+|/+$")));
+  const auto found = std::find_if(repositoryAnalysis_.pathEntries.cbegin(),
+                                  repositoryAnalysis_.pathEntries.cend(),
+                                  [&normalized](const auto& entry) {
+                                    return entry.directory && entry.path == normalized;
+                                  });
+  if (found == repositoryAnalysis_.pathEntries.cend() || normalized == analysisPath_) return;
+  analysisPath_ = normalized;
+  emit analysisChanged();
+}
+
+void SnapshotController::navigateAnalysisPathUp() {
+  if (analysisPath_.isEmpty()) return;
+  const auto slash = analysisPath_.lastIndexOf(QChar('/'));
+  analysisPath_ = slash < 0 ? QString() : analysisPath_.left(slash);
+  emit analysisChanged();
+}
+
+void SnapshotController::filterAnalysisObjects(const QString& path, const QString& suffix) {
+  if (!repositoryAnalysis_.success) return;
+  analysisObjectPathFilter_ = QDir::fromNativeSeparators(path);
+  analysisObjectSuffixFilter_ = suffix.toLower();
+  emit analysisChanged();
+}
+
+void SnapshotController::clearAnalysisObjectFilter() {
+  if (analysisObjectPathFilter_.isEmpty() && analysisObjectSuffixFilter_.isEmpty()) return;
+  analysisObjectPathFilter_.clear();
+  analysisObjectSuffixFilter_.clear();
+  emit analysisChanged();
+}
+
 void SnapshotController::previewProjectCleanup() {
   if (busy() || selectedRepository_ < 0 || selectedRepository_ >= scanResult_.repositories.size()) return;
   projectPlan_ = {};
   projectPlanMode_ = QStringLiteral("safe");
   const auto repository = scanResult_.repositories[selectedRepository_];
+  projectPreviewRepositoryIndex_ = selectedRepository_;
   const auto settings = cleanupSettings();
   setStatus(tr("Previewing safe cleanup for %1…").arg(repository.relativePath));
   emit projectPlanChanged();
@@ -419,6 +524,7 @@ void SnapshotController::previewProjectReset() {
   projectPlan_ = {};
   projectPlanMode_ = QStringLiteral("reset");
   const auto repository = scanResult_.repositories[selectedRepository_];
+  projectPreviewRepositoryIndex_ = selectedRepository_;
   const auto settings = cleanupSettings();
   setStatus(tr("Previewing snapshot-history reset for %1…").arg(repository.relativePath));
   emit projectPlanChanged();
@@ -428,12 +534,29 @@ void SnapshotController::previewProjectReset() {
   }));
 }
 
+void SnapshotController::previewProjectPurge() {
+  if (busy() || selectedRepository_ < 0 || selectedRepository_ >= scanResult_.repositories.size()) return;
+  projectPlan_ = {};
+  projectPlanMode_ = QStringLiteral("purge");
+  const auto repository = scanResult_.repositories[selectedRepository_];
+  projectPreviewRepositoryIndex_ = selectedRepository_;
+  const auto root = settings_.snapshotRoot;
+  setStatus(tr("Validating full snapshot-store purge for %1…").arg(repository.relativePath));
+  emit projectPlanChanged();
+  notifyBusy();
+  projectPreviewWatcher_.setFuture(QtConcurrent::run([repository, root] {
+    return SnapshotCleaner().previewPurge(repository, root);
+  }));
+}
+
 void SnapshotController::executeProjectAction() {
   if (busy() || !hasProjectPlan()) return;
   const auto plan = projectPlan_;
   const auto settings = cleanupSettings();
   setStatus(projectPlanMode_ == QStringLiteral("reset")
                 ? tr("Resetting selected project snapshot history. Do not start OpenCode…")
+                : projectPlanMode_ == QStringLiteral("purge")
+                ? tr("Removing the selected snapshot store. Do not start OpenCode…")
                 : tr("Cleaning selected project snapshot storage. Do not start OpenCode…"));
   projectPlan_ = {};
   projectPlanMode_.clear();
