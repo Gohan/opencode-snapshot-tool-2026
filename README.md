@@ -4,14 +4,21 @@ A cross-platform Qt 6 desktop application for inspecting OpenCode snapshot stora
 
 ![OpenCode Snapshot Tool repository storage details](docs/images/repository-storage-details-preview.png)
 
-See the [implementation report](docs/implementation-report.md) for the complete change summary, current screenshots, verification results, and remaining user-acceptance checks.
+The current `v0.1.3` interface keeps the fast, read-only scan separate from optional per-repository deep analysis:
+
+- The summary cards report actual bytes under the snapshot root, repository and snapshot counts, the current retention decision, and directly removable LFS/temp files.
+- The repository list shows each store's worktree, exact storage usage, record counts, and process state. An active store is tied to its matching OpenCode PID; unrelated inactive stores remain available.
+- The detail area is split into **Overview**, **Paths**, **Types**, **Objects**, **Snapshots**, and **Reclaim**. Overview gives immediate filesystem accounting; **Deep Analyze** adds Git reachability and path attribution for only the selected repository.
+- The bottom action rail makes the destructive boundary explicit: **01 Batch Preview** is read-only, and **02 Batch Clean** stays locked until that exact plan has been reviewed.
+
+See the [implementation report](docs/implementation-report.md) for the engineering change history and verification evidence. The latest packaged build is available from [GitHub Releases](https://github.com/Gohan/opencode-snapshot-tool-2026/releases/latest).
 
 ## What it does
 
 - Scans both legacy and project/worktree snapshot layouts.
 - Joins snapshot tree hashes to OpenCode session metadata from SQLite.
 - Reports the actual logical bytes under the snapshot root, including Git packs, Git LFS, metadata, and temporary pack files.
-- Deep-analyzes one repository into drillable current-tree paths, file types, largest blobs, pack files, protected history, and unprotected Git objects.
+- Shows an immediate per-repository storage breakdown, then deep-analyzes only the selected repository into drillable current-tree paths, file types, largest blobs, pack files, protected history, and unprotected Git objects.
 - Retains every snapshot seen within a configurable time window; if none are recent, retains the newest N trees per repository.
 - Always protects the current Git index tree.
 - Reports missing paths, database failures, and unmapped historical records without hiding partial results.
